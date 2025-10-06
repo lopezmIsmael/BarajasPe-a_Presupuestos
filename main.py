@@ -37,25 +37,42 @@ class ModernApp:
         """Configura la ventana principal con estilo moderno - Compatible con Linux y Windows"""
         self.root.title(MAIN_WINDOW_TITLE)
         
-        # Maximizar ventana (multi-plataforma)
-        # Intenta diferentes métodos según el sistema operativo
+        # Forzar actualización inicial de la ventana
+        self.root.update_idletasks()
+        
+        # Obtener dimensiones de la pantalla
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        
+        # Configurar ventana para que ocupe toda la pantalla
+        # Intentar maximizar la ventana según la plataforma
+        maximized = False
         try:
             # Linux con X11: usar atributo -zoomed
             self.root.attributes('-zoomed', True)
+            maximized = True
         except:
+            pass
+        
+        if not maximized:
             try:
                 # Windows: usar state zoomed
                 self.root.state('zoomed')
+                maximized = True
             except:
-                # Fallback universal: establecer geometría manualmente
-                width = self.root.winfo_screenwidth()
-                height = self.root.winfo_screenheight()
-                self.root.geometry(f'{width}x{height}+0+0')
+                pass
+        
+        if not maximized:
+            # Fallback: usar geometría de pantalla completa
+            self.root.geometry(f'{screen_width}x{screen_height}+0+0')
+        
+        # Forzar actualización para aplicar cambios
+        self.root.update_idletasks()
         
         # Variable para controlar estado fullscreen
         self.is_fullscreen = False
         
-        # Atajos de teclado para pantalla completa (funciona en ambos sistemas)
+        # Atajos de teclado para pantalla completa
         self.root.bind('<F11>', lambda e: self._toggle_fullscreen())  # Alternar fullscreen
         self.root.bind('<Escape>', lambda e: self._exit_fullscreen())  # Salir de fullscreen
         
@@ -91,19 +108,20 @@ class ModernApp:
             COMPANY_NAME, 
             None  # Sin subtítulo
         )
+        # El header ya se posiciona con pack internamente
     
     def _create_modern_actions(self):
         """Crea las acciones rápidas como cards modernas"""
         actions_container = ttk.Frame(self.root)
-        actions_container.pack(fill='x', padx=30, pady=20)
+        actions_container.pack(fill='x', padx=20, pady=(10, 5))
         
         section_title = ttk.Label(
             actions_container, 
             text="Acciones Rápidas", 
-            font=('Segoe UI', 16, 'bold'),
+            font=('Segoe UI', 12, 'bold'),
             foreground='#263238'
         )
-        section_title.pack(anchor='w', pady=(0, 15))
+        section_title.pack(anchor='w', pady=(0, 5))
         
         cards_frame = ttk.Frame(actions_container)
         cards_frame.pack(fill='x')
@@ -137,7 +155,7 @@ class ModernApp:
     def _create_main_notebook(self):
         """Crea el notebook principal con las pestañas modernas"""
         notebook_container = ttk.Frame(self.root)
-        notebook_container.pack(fill='both', expand=True, padx=30, pady=20)
+        notebook_container.pack(fill='both', expand=True, padx=20, pady=(5, 5))
         
         self.notebook = ttk.Notebook(notebook_container, style='Modern.TNotebook')
         self.notebook.pack(fill='both', expand=True)
@@ -157,6 +175,7 @@ class ModernApp:
             self.root, 
             f"{ICONS['company']} Sistema listo"
         )
+        # El status bar ya se posiciona con pack internamente (side='bottom')
     
     def _setup_keyboard_shortcuts(self):
         """Configura los atajos de teclado globales"""

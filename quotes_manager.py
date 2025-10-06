@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 import db
 from pdf_generator import export_quote_to_pdf
+from pdf_preview import generate_quote_preview
 from config import QUOTE_EDITOR_SIZE, QUOTE_VIEWER_SIZE, PDF_FILETYPES
 from ui_utils import (
     center_window, create_styled_button, create_search_frame,
@@ -13,6 +14,8 @@ from ui_utils import (
 )
 from materials_manager import MaterialEditor
 from clients_manager import ClientEditor
+from PIL import Image, ImageTk
+from datetime import datetime
 
 
 class QuotesFrame(ttk.Frame):
@@ -306,6 +309,8 @@ class QuoteEditor(tk.Toplevel):
         self.quote_id = quote_id
         self.on_save = on_save
         self.items_data = []  # Lista de items del presupuesto
+        self.preview_photo = None  # Para evitar garbage collection
+        self.preview_update_job = None  # Para debouncing de updates
         
         self._setup_window()
         self._setup_ui()
@@ -347,13 +352,17 @@ class QuoteEditor(tk.Toplevel):
         
         main_container.grid_rowconfigure(0, weight=1)
         main_container.grid_columnconfigure(0, weight=0)  # Panel izquierdo fijo
-        main_container.grid_columnconfigure(1, weight=1)  # Panel derecho expandible
+        main_container.grid_columnconfigure(1, weight=1)  # Panel centro expandible
+        main_container.grid_columnconfigure(2, weight=0)  # Panel derecho preview fijo
         
         # Panel izquierdo - Cliente y configuración (más compacto)
         self._create_left_panel(main_container)
         
-        # Panel derecho - Items del presupuesto
-        self._create_right_panel(main_container)
+        # Panel centro - Items del presupuesto
+        self._create_center_panel(main_container)
+        
+        # Panel derecho - Preview del PDF
+        self._create_preview_panel(main_container)
         
         # Botones principales en la parte inferior
         self._create_bottom_buttons()
@@ -363,8 +372,9 @@ class QuoteEditor(tk.Toplevel):
         left_panel = ttk.Frame(parent, padding=10)
         left_panel.grid(row=0, column=0, sticky='nsew', padx=(10, 5), pady=10)
         
-        # Hacer que el panel izquierdo tenga un ancho fijo pero sea scrolleable si es necesario
-        left_panel.grid_rowconfigure(3, weight=1)  # La sección de materiales se expande
+        # Configurar expansión de filas
+        left_panel.grid_rowconfigure(3, weight=1)  # La sección de notas se expande
+        left_panel.grid_rowconfigure(4, weight=1)  # La sección de materiales se expande
         
         # Sección cliente
         self._create_client_section(left_panel)
@@ -374,6 +384,9 @@ class QuoteEditor(tk.Toplevel):
         
         # Sección mano de obra
         self._create_labor_section(left_panel)
+        
+        # Sección notas
+        self._create_notes_section(left_panel)
         
         # Sección búsqueda de materiales
         self._create_material_search_section(left_panel)
@@ -444,13 +457,38 @@ class QuoteEditor(tk.Toplevel):
         # Actualizar totales cuando cambie
         self.labor_entry.bind('<KeyRelease>', lambda e: self._update_totals())
     
+    def _create_notes_section(self, parent):
+        """Crea la sección de notas"""
+        notes_frame = ttk.LabelFrame(parent, text='Notas / Observaciones', padding=10)
+        notes_frame.grid(row=3, column=0, sticky='nsew', pady=(0, 8))
+        
+        # Configurar para que se expanda
+        notes_frame.grid_rowconfigure(0, weight=1)
+        notes_frame.grid_columnconfigure(0, weight=1)
+        
+        # Text widget para notas con scrollbar (más grande)
+        text_container = ttk.Frame(notes_frame)
+        text_container.grid(row=0, column=0, sticky='nsew')
+        
+        self.notes_text = tk.Text(text_container, height=8, width=35, 
+                                  font=('Helvetica', 10), wrap='word')
+        self.notes_text.pack(side='left', fill='both', expand=True)
+        
+        notes_scrollbar = ttk.Scrollbar(text_container, orient='vertical', 
+                                       command=self.notes_text.yview)
+        self.notes_text.configure(yscrollcommand=notes_scrollbar.set)
+        notes_scrollbar.pack(side='right', fill='y')
+        
+        # Actualizar preview cuando cambien las notas
+        self.notes_text.bind('<KeyRelease>', lambda e: self._schedule_preview_update())
+    
     def _create_material_search_section(self, parent):
         """Crea la sección de búsqueda y adición de materiales"""
         mat_frame = ttk.LabelFrame(parent, text='Buscar y añadir material', padding=10)
-        mat_frame.grid(row=3, column=0, sticky='nsew', pady=(0, 0))
+        mat_frame.grid(row=4, column=0, sticky='nsew', pady=(0, 0))
         
         # Configurar para que se expanda verticalmente
-        parent.grid_rowconfigure(3, weight=1)
+        parent.grid_rowconfigure(4, weight=1)
         
         # Campo de búsqueda
         self.mat_search_var = tk.StringVar()
@@ -504,22 +542,22 @@ class QuoteEditor(tk.Toplevel):
         )
         new_btn.pack(side='right', fill='x', expand=True, padx=(3, 0))
     
-    def _create_right_panel(self, parent):
-        """Crea el panel derecho con la lista de items"""
-        right_panel = ttk.Frame(parent, padding=10)
-        right_panel.grid(row=0, column=1, sticky='nsew', padx=(5, 10), pady=10)
+    def _create_center_panel(self, parent):
+        """Crea el panel central con la lista de items"""
+        center_panel = ttk.Frame(parent, padding=10)
+        center_panel.grid(row=0, column=1, sticky='nsew', padx=(5, 5), pady=10)
         
         # Configurar para que se expanda
-        right_panel.grid_rowconfigure(1, weight=1)
-        right_panel.grid_columnconfigure(0, weight=1)
+        center_panel.grid_rowconfigure(1, weight=1)
+        center_panel.grid_columnconfigure(0, weight=1)
         
         # Título
-        title_label = ttk.Label(right_panel, text='Items del presupuesto', 
+        title_label = ttk.Label(center_panel, text='Items del presupuesto', 
                  font=('Helvetica', 12, 'bold'))
         title_label.grid(row=0, column=0, sticky='w', pady=(0, 8))
         
         # Frame con borde visible para la tabla
-        border_canvas = tk.Canvas(right_panel, highlightthickness=2,
+        border_canvas = tk.Canvas(center_panel, highlightthickness=2,
                                  highlightbackground='#2B7DE9',
                                  highlightcolor='#2B7DE9',
                                  background='#FFFFFF')
@@ -559,7 +597,7 @@ class QuoteEditor(tk.Toplevel):
         self.items_tree.bind('<Double-Button-1>', lambda e: self._edit_item_cell(e))
         
         # Botones de items (más compactos y ordenados)
-        item_btns = ttk.Frame(right_panel)
+        item_btns = ttk.Frame(center_panel)
         item_btns.grid(row=2, column=0, sticky='ew', pady=(0, 8))
         
         edit_btn = create_styled_button(item_btns, '✏️ Editar', self._edit_item, 'info')
@@ -569,12 +607,55 @@ class QuoteEditor(tk.Toplevel):
         remove_btn.pack(side='left')
         
         # Resumen de totales (más compacto)
-        totals_frame = ttk.LabelFrame(right_panel, text='Resumen', padding=8)
+        totals_frame = ttk.LabelFrame(center_panel, text='Resumen', padding=8)
         totals_frame.grid(row=3, column=0, sticky='ew')
         
         self.total_label = ttk.Label(totals_frame, text='Total: 0.00 €', 
                                    font=('Helvetica', 12, 'bold'))
         self.total_label.pack()
+    
+    def _create_preview_panel(self, parent):
+        """Crea el panel derecho con la previsualización del PDF"""
+        preview_panel = ttk.Frame(parent, padding=10)
+        preview_panel.grid(row=0, column=2, sticky='nsew', padx=(5, 10), pady=10)
+        
+        # Configurar para que se expanda
+        preview_panel.grid_rowconfigure(1, weight=1)
+        preview_panel.grid_columnconfigure(0, weight=1)
+        
+        # Título
+        title_label = ttk.Label(preview_panel, text='Vista Previa del PDF', 
+                 font=('Helvetica', 12, 'bold'))
+        title_label.grid(row=0, column=0, sticky='w', pady=(0, 8))
+        
+        # Frame con scroll para la imagen del PDF
+        canvas_frame = ttk.Frame(preview_panel)
+        canvas_frame.grid(row=1, column=0, sticky='nsew')
+        canvas_frame.grid_rowconfigure(0, weight=1)
+        canvas_frame.grid_columnconfigure(0, weight=1)
+        
+        # Canvas con scrollbars
+        self.preview_canvas = tk.Canvas(canvas_frame, width=400, height=600, 
+                                       bg='#E0E0E0', highlightthickness=1,
+                                       highlightbackground='#2B7DE9')
+        self.preview_canvas.grid(row=0, column=0, sticky='nsew')
+        
+        # Scrollbars
+        v_scrollbar = ttk.Scrollbar(canvas_frame, orient='vertical', 
+                                   command=self.preview_canvas.yview)
+        v_scrollbar.grid(row=0, column=1, sticky='ns')
+        
+        h_scrollbar = ttk.Scrollbar(canvas_frame, orient='horizontal',
+                                   command=self.preview_canvas.xview)
+        h_scrollbar.grid(row=1, column=0, sticky='ew')
+        
+        self.preview_canvas.configure(yscrollcommand=v_scrollbar.set,
+                                     xscrollcommand=h_scrollbar.set)
+        
+        # Botón para actualizar manualmente
+        refresh_btn = create_styled_button(preview_panel, '🔄 Actualizar Vista Previa', 
+                                          self._update_preview, 'primary')
+        refresh_btn.grid(row=2, column=0, sticky='ew', pady=(8, 0))
     
     def _create_bottom_buttons(self):
         """Crea los botones principales de la ventana"""
@@ -845,6 +926,9 @@ class QuoteEditor(tk.Toplevel):
         self.total_label.config(
             text=f'Subtotal: {subtotal:.2f} € | Mano de obra: {labor_cost:.2f} € | TOTAL: {total:.2f} €'
         )
+        
+        # Actualizar preview
+        self._schedule_preview_update()
     
     def _edit_item_cell(self, event):
         """Edita la celda clickeada directamente en el Treeview"""
@@ -968,6 +1052,11 @@ class QuoteEditor(tk.Toplevel):
             self.labor_entry.delete(0, tk.END)
             self.labor_entry.insert(0, str(quote['labor_cost']))
         
+        # Cargar notas
+        if quote.get('notes'):
+            self.notes_text.delete('1.0', tk.END)
+            self.notes_text.insert('1.0', quote['notes'])
+        
         # Cargar items
         for item in items:
             # Obtener precio de proveedor
@@ -988,6 +1077,71 @@ class QuoteEditor(tk.Toplevel):
             })
         
         self._refresh_items()
+    
+    def _schedule_preview_update(self):
+        """Programa una actualización de la preview con debounce"""
+        # Cancelar actualización pendiente
+        if self.preview_update_job:
+            self.after_cancel(self.preview_update_job)
+        
+        # Programar nueva actualización en 500ms
+        self.preview_update_job = self.after(500, self._update_preview)
+    
+    def _update_preview(self):
+        """Actualiza la vista previa del PDF"""
+        try:
+            # Obtener datos actuales
+            client_name = self.client_search_var.get().strip() or "Cliente"
+            client_address = ""
+            client_dni = ""
+            
+            if self.selected_client:
+                client_address = self.selected_client.get('address', '')
+                client_dni = self.selected_client.get('dni', '')
+            
+            work_name = self.work_name_entry.get().strip()
+            notes = self.notes_text.get('1.0', tk.END).strip()
+            
+            try:
+                labor_cost = float(self.labor_entry.get())
+            except:
+                labor_cost = 0.0
+            
+            # Fecha actual
+            date_str = datetime.now().strftime('%d de %B de %Y')
+            
+            # Generar preview
+            preview_image = generate_quote_preview(
+                client_name, client_address, client_dni, work_name,
+                self.items_data, labor_cost, notes, date_str
+            )
+            
+            if preview_image:
+                # Redimensionar imagen para que quepa en el canvas
+                canvas_width = 400
+                img_width, img_height = preview_image.size
+                scale = canvas_width / img_width
+                new_width = int(img_width * scale)
+                new_height = int(img_height * scale)
+                
+                preview_image = preview_image.resize((new_width, new_height), Image.LANCZOS)
+                
+                # Convertir a PhotoImage
+                self.preview_photo = ImageTk.PhotoImage(preview_image)
+                
+                # Limpiar canvas
+                self.preview_canvas.delete('all')
+                
+                # Mostrar imagen
+                self.preview_canvas.create_image(0, 0, anchor='nw', image=self.preview_photo)
+                
+                # Actualizar scrollregion
+                self.preview_canvas.configure(scrollregion=(0, 0, new_width, new_height))
+        
+        except Exception as e:
+            print(f"Error actualizando preview: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _save(self):
         """Valida y guarda el presupuesto"""
@@ -1035,13 +1189,17 @@ class QuoteEditor(tk.Toplevel):
         # Obtener nombre de obra
         work_name = self.work_name_entry.get().strip() or None
         
+        # Obtener notas
+        notes = self.notes_text.get('1.0', tk.END).strip() or None
+        
         try:
             # Crear o actualizar presupuesto
             if self.quote_id:
                 # Actualizar presupuesto existente
                 db.update_quote(
                     self.quote_id, client_id, client_name, 
-                    client_address, client_dni, work_name=work_name, labor_cost=labor_cost
+                    client_address, client_dni, work_name=work_name, 
+                    labor_cost=labor_cost, notes=notes
                 )
                 # Eliminar items antiguos y añadir nuevos
                 quote, old_items = db.get_quote(self.quote_id)
@@ -1052,7 +1210,8 @@ class QuoteEditor(tk.Toplevel):
                 # Crear nuevo presupuesto
                 quote_id = db.create_quote(
                     client_id, client_name, client_address, 
-                    client_dni, work_name=work_name, labor_cost=labor_cost
+                    client_dni, work_name=work_name, labor_cost=labor_cost,
+                    notes=notes
                 )
             
             # Añadir items y actualizar precios en BD si han cambiado

@@ -30,22 +30,22 @@ MAIN_WINDOW_TITLE = f"{COMPANY_NAME} - Gestión de Presupuestos"
 
 MATERIAL_EDITOR_SIZE = '700x600'
 CLIENT_EDITOR_SIZE = '650x500'
-QUOTE_EDITOR_SIZE = '1200x750'
+QUOTE_EDITOR_SIZE = '1600x850'
 QUOTE_VIEWER_SIZE = '950x650'
 
 BUTTON_STYLE = {'padding': (12, 8), 'width': 18}
 SMALL_BUTTON_STYLE = {'padding': (8, 6), 'width': 12}
 ACTION_BUTTON_STYLE = {'padding': (15, 10), 'width': 20}
 
-HEADER_FONT = ('Segoe UI', 28, 'bold')
-SUBHEADER_FONT = ('Segoe UI', 14, 'normal')
+HEADER_FONT = ('Segoe UI', 22, 'bold')
+SUBHEADER_FONT = ('Segoe UI', 12, 'normal')
 BUTTON_FONT = ('Segoe UI', 10, 'bold')
 LABEL_FONT = ('Segoe UI', 10, 'bold')
 TEXT_FONT = ('Segoe UI', 10, 'normal')
 
-HEADER_PADDING = (25, 20)
-SECTION_PADDING = (20, 15)
-WIDGET_PADDING = (10, 5)
+HEADER_PADDING = (20, 12)
+SECTION_PADDING = (15, 10)
+WIDGET_PADDING = (8, 4)
 
 try:
     import ttkbootstrap as ttkb

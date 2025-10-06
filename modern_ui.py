@@ -249,23 +249,23 @@ def create_action_card(parent, title, icon, description, command, style='primary
         card_canvas.itemconfig(rect_id, fill=CARD_BACKGROUND)
     
     card_frame = ttk.Frame(parent)
-    card_frame.pack(side='left', padx=10, pady=5)
+    card_frame.pack(side='left', padx=8, pady=3)
     
-    card_canvas = tk.Canvas(card_frame, width=190, height=130,
+    card_canvas = tk.Canvas(card_frame, width=170, height=100,
                           background=CARD_BACKGROUND, highlightthickness=2,
                           highlightbackground='#D0D7DE')
     card_canvas.pack()
     
-    rect_id = card_canvas.create_rectangle(2, 2, 188, 128, fill=CARD_BACKGROUND, outline='#E3F2FD', width=2)
+    rect_id = card_canvas.create_rectangle(2, 2, 168, 98, fill=CARD_BACKGROUND, outline='#E3F2FD', width=2)
     
-    card_canvas.create_text(95, 35, text=icon, font=('Segoe UI', 26))
+    card_canvas.create_text(85, 25, text=icon, font=('Segoe UI', 20))
     
-    card_canvas.create_text(95, 65, text=title, 
-                          font=('Segoe UI', 12, 'bold'),
+    card_canvas.create_text(85, 50, text=title, 
+                          font=('Segoe UI', 11, 'bold'),
                           fill=BRAND_COLOR_TEXT)
     
-    card_canvas.create_text(95, 90, text=description,
-                          font=('Segoe UI', 9),
+    card_canvas.create_text(85, 70, text=description,
+                          font=('Segoe UI', 8),
                           fill=BRAND_COLOR_TEXT_LIGHT)
     
     card_canvas.bind('<Button-1>', lambda e: command())
