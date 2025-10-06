@@ -32,9 +32,9 @@ class QuotesFrame(ttk.Frame):
         search_frame, search_entry = create_search_frame(self, self.search_var)
         
         # Tabla de presupuestos
-        columns = ('id', 'date', 'client', 'total')
-        headings = ('#', 'Fecha', 'Cliente', 'Total (€)')
-        column_widths = (60, 120, 250, 120)
+        columns = ('id', 'work_name', 'client', 'date', 'total')
+        headings = ('#', 'Obra', 'Cliente', 'Fecha', 'Total (€)')
+        column_widths = (50, 250, 200, 100, 100)
         
         tree_frame, self.tree = create_treeview_with_scrollbar(
             self, columns, headings, column_widths
@@ -45,7 +45,6 @@ class QuotesFrame(ttk.Frame):
         
         # Botones de acción
         buttons_config = [
-            ('➕ Nuevo Presupuesto', self.new_quote, 'success'),
             ('✏️ Editar', self.edit_quote, 'info'),
             ('🗑️ Eliminar', self.delete_quote, 'danger'),
             ('📄 Exportar PDF', self.export_pdf, 'primary'),
@@ -64,11 +63,18 @@ class QuotesFrame(ttk.Frame):
         search_term = self.search_var.get().lower()
         quotes = db.list_quotes()
         
+        row_count = 0
         for quote in quotes:
+            # Obtener work_name de forma segura
+            try:
+                work_name = quote['work_name'] or ''
+            except (KeyError, IndexError):
+                work_name = ''
+            
             # Aplicar filtro de búsqueda
             if search_term:
                 client_name = quote['client_name'] or ''
-                if search_term not in client_name.lower():
+                if search_term not in client_name.lower() and search_term not in work_name.lower():
                     continue
             
             # Calcular total
@@ -76,13 +82,19 @@ class QuotesFrame(ttk.Frame):
             total = sum(item['unit_price'] * item['quantity'] for item in items)
             total += quote['labor_cost'] or 0
             
+            # Alternar colores de filas
+            tag = 'evenrow' if row_count % 2 == 0 else 'oddrow'
+            
             # Añadir item al árbol
             self.tree.insert('', 'end', iid=str(quote['id']), values=(
                 quote['id'],
-                quote['date'],
+                work_name or 'Sin nombre',
                 quote['client_name'] or '',
+                quote['date'],
                 f"{total:.2f}"
-            ))
+            ), tags=(tag,))
+            
+            row_count += 1
     
     def new_quote(self):
         """Abre el editor para crear un nuevo presupuesto"""
@@ -216,26 +228,56 @@ class QuoteViewer(tk.Toplevel):
         items_frame = ttk.LabelFrame(self, text='Items', padding=10)
         items_frame.pack(fill='both', expand=True, padx=20, pady=10)
         
-        # Configurar treeview para items
-        columns = ('name', 'qty', 'price', 'total')
-        tree = ttk.Treeview(items_frame, columns=columns, show='headings', height=10)
+        # Frame con borde visible
+        border_canvas = tk.Canvas(items_frame, highlightthickness=3,
+                                 highlightbackground='#2B7DE9',
+                                 highlightcolor='#2B7DE9',
+                                 background='#FFFFFF')
+        border_canvas.pack(fill='both', expand=True)
         
-        tree.heading('name', text='Material')
-        tree.heading('qty', text='Cantidad')
-        tree.heading('price', text='Precio Unit.')
-        tree.heading('total', text='Total')
+        tree_container = ttk.Frame(border_canvas)
+        tree_container.pack(fill='both', expand=True, padx=2, pady=2)
+        
+        # Configurar treeview para items con columnas de ambos precios
+        columns = ('name', 'qty', 'supplier_price', 'price', 'total')
+        tree = ttk.Treeview(tree_container, columns=columns, show='headings', height=10)
+        
+        tree.heading('name', text='Material', anchor='w')
+        tree.heading('qty', text='Cantidad', anchor='w')
+        tree.heading('supplier_price', text='P. Proveedor', anchor='w')
+        tree.heading('price', text='P. Venta', anchor='w')
+        tree.heading('total', text='Total', anchor='w')
+        
+        tree.column('name', anchor='w')
+        tree.column('qty', anchor='w')
+        tree.column('supplier_price', anchor='w')
+        tree.column('price', anchor='w')
+        tree.column('total', anchor='w')
+        
+        # Configurar tags para filas alternadas con mejor contraste
+        tree.tag_configure('oddrow', background='#FFFFFF')
+        tree.tag_configure('evenrow', background='#F0F4F8')
         
         tree.pack(fill='both', expand=True)
         
-        # Cargar items
-        for item in items:
+        # Cargar items con filas alternadas
+        for i, item in enumerate(items):
             line_total = item['unit_price'] * item['quantity']
+            tag = 'evenrow' if i % 2 == 0 else 'oddrow'
+            
+            # Obtener precio de proveedor (sqlite3.Row no tiene .get())
+            try:
+                supplier_price = item['supplier_price'] or 0
+            except (KeyError, IndexError):
+                supplier_price = 0
+            
             tree.insert('', 'end', values=(
                 item['name'],
                 item['quantity'],
-                f"{item['unit_price']:.2f} €",
-                f"{line_total:.2f} €"
-            ))
+                f"{supplier_price:.2f}",
+                f"{item['unit_price']:.2f}",
+                f"{line_total:.2f}"
+            ), tags=(tag,))
     
     def _create_totals_section(self, quote, items):
         """Crea la sección de totales"""
@@ -295,101 +337,145 @@ class QuoteEditor(tk.Toplevel):
     
     def _setup_ui(self):
         """Configura la interfaz de usuario"""
-        # Panel izquierdo - Cliente y configuración
-        self._create_left_panel()
+        # Contenedor principal con grid
+        main_container = ttk.Frame(self)
+        main_container.grid(row=0, column=0, sticky='nsew', padx=0, pady=0)
+        
+        # Configurar peso de filas y columnas para redimensionamiento
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+        
+        main_container.grid_rowconfigure(0, weight=1)
+        main_container.grid_columnconfigure(0, weight=0)  # Panel izquierdo fijo
+        main_container.grid_columnconfigure(1, weight=1)  # Panel derecho expandible
+        
+        # Panel izquierdo - Cliente y configuración (más compacto)
+        self._create_left_panel(main_container)
         
         # Panel derecho - Items del presupuesto
-        self._create_right_panel()
+        self._create_right_panel(main_container)
         
-        # Botones principales
+        # Botones principales en la parte inferior
         self._create_bottom_buttons()
     
-    def _create_left_panel(self):
+    def _create_left_panel(self, parent):
         """Crea el panel izquierdo con cliente y búsqueda de materiales"""
-        left_panel = ttk.Frame(self, padding=15)
-        left_panel.pack(side='left', fill='y')
+        left_panel = ttk.Frame(parent, padding=10)
+        left_panel.grid(row=0, column=0, sticky='nsew', padx=(10, 5), pady=10)
+        
+        # Hacer que el panel izquierdo tenga un ancho fijo pero sea scrolleable si es necesario
+        left_panel.grid_rowconfigure(3, weight=1)  # La sección de materiales se expande
         
         # Sección cliente
         self._create_client_section(left_panel)
         
-        # Separador
-        ttk.Separator(left_panel, orient='horizontal').pack(fill='x', pady=15)
+        # Sección nombre de obra
+        self._create_work_name_section(left_panel)
         
         # Sección mano de obra
         self._create_labor_section(left_panel)
-        
-        # Separador
-        ttk.Separator(left_panel, orient='horizontal').pack(fill='x', pady=15)
         
         # Sección búsqueda de materiales
         self._create_material_search_section(left_panel)
     
     def _create_client_section(self, parent):
-        """Crea la sección de selección de cliente"""
-        ttk.Label(parent, text='Cliente', font=('Helvetica', 12, 'bold')).pack(anchor='w', pady=(0,5))
-        
-        client_frame = ttk.Frame(parent)
-        client_frame.pack(fill='x', pady=5)
+        """Crea la sección de selección de cliente con búsqueda"""
+        client_frame = ttk.LabelFrame(parent, text='Cliente', padding=10)
+        client_frame.grid(row=0, column=0, sticky='ew', pady=(0, 8))
         
         # Cargar lista de clientes
         self.clients_list = db.list_clients()
-        client_names = [c['name'] for c in self.clients_list]
+        self.filtered_clients = self.clients_list.copy()
+        self.selected_client = None
         
-        self.client_cb = ttk.Combobox(client_frame, values=client_names, width=25)
-        self.client_cb.pack(side='top', fill='x')
+        # Campo de búsqueda de cliente
+        self.client_search_var = tk.StringVar()
+        self.client_search_var.trace('w', lambda *args: self._filter_clients())
         
-        # Botón para añadir nuevo cliente
+        search_container = ttk.Frame(client_frame)
+        search_container.pack(fill='x', pady=(0, 5))
+        
+        self.client_entry = ttk.Entry(search_container, textvariable=self.client_search_var, 
+                                      font=('Helvetica', 10))
+        self.client_entry.pack(fill='x')
+        
+        # Lista de resultados de clientes (más compacta)
+        list_frame = ttk.Frame(client_frame)
+        list_frame.pack(fill='both', expand=False, pady=(0, 5))
+        
+        self.client_listbox = tk.Listbox(list_frame, height=3, font=('Helvetica', 9))
+        self.client_listbox.pack(side='left', fill='both', expand=True)
+        
+        client_scrollbar = ttk.Scrollbar(list_frame, orient='vertical', 
+                                        command=self.client_listbox.yview)
+        self.client_listbox.configure(yscrollcommand=client_scrollbar.set)
+        client_scrollbar.pack(side='right', fill='y')
+        
+        # Doble click o Enter para seleccionar
+        self.client_listbox.bind('<Double-Button-1>', lambda e: self._select_client())
+        self.client_listbox.bind('<Return>', lambda e: self._select_client())
+        
+        # Mostrar todos los clientes inicialmente
+        self._show_all_clients()
+        
+        # Botón para añadir nuevo cliente (más compacto)
         new_client_btn = create_styled_button(
-            client_frame, '➕ Nuevo cliente', self._quick_add_client, 'success'
+            client_frame, '+ Nuevo', self._quick_add_client, 'success'
         )
-        new_client_btn.pack(fill='x', pady=5)
+        new_client_btn.pack(fill='x')
+    
+    def _create_work_name_section(self, parent):
+        """Crea la sección de nombre de obra"""
+        work_frame = ttk.LabelFrame(parent, text='Nombre de Obra', padding=10)
+        work_frame.grid(row=1, column=0, sticky='ew', pady=(0, 8))
+        
+        self.work_name_entry = ttk.Entry(work_frame, font=('Helvetica', 10))
+        self.work_name_entry.pack(fill='x')
     
     def _create_labor_section(self, parent):
         """Crea la sección de mano de obra"""
-        ttk.Label(parent, text='Mano de obra (€)', font=('Helvetica', 11, 'bold')).pack(anchor='w')
+        labor_frame = ttk.LabelFrame(parent, text='Mano de obra (€)', padding=10)
+        labor_frame.grid(row=2, column=0, sticky='ew', pady=(0, 8))
         
-        self.labor_entry = ttk.Entry(parent, width=15, font=('Helvetica', 12))
+        self.labor_entry = ttk.Entry(labor_frame, font=('Helvetica', 10))
         self.labor_entry.insert(0, '0')
-        self.labor_entry.pack(anchor='w', pady=5)
+        self.labor_entry.pack(fill='x')
         
         # Actualizar totales cuando cambie
         self.labor_entry.bind('<KeyRelease>', lambda e: self._update_totals())
     
     def _create_material_search_section(self, parent):
         """Crea la sección de búsqueda y adición de materiales"""
-        ttk.Label(parent, text='Buscar y añadir material', 
-                 font=('Helvetica', 11, 'bold')).pack(anchor='w', pady=(0,5))
+        mat_frame = ttk.LabelFrame(parent, text='Buscar y añadir material', padding=10)
+        mat_frame.grid(row=3, column=0, sticky='nsew', pady=(0, 0))
+        
+        # Configurar para que se expanda verticalmente
+        parent.grid_rowconfigure(3, weight=1)
         
         # Campo de búsqueda
-        search_frame = ttk.Frame(parent)
-        search_frame.pack(fill='x', pady=5)
-        
         self.mat_search_var = tk.StringVar()
         self.mat_search_var.trace('w', lambda *args: self._filter_materials())
         
-        search_entry = ttk.Entry(search_frame, textvariable=self.mat_search_var, 
+        search_entry = ttk.Entry(mat_frame, textvariable=self.mat_search_var, 
                                 font=('Helvetica', 10))
-        search_entry.pack(fill='x')
+        search_entry.pack(fill='x', pady=(0, 5))
         
-        ttk.Label(search_frame, text='🔍 Escribe para buscar...', 
-                 font=('Helvetica', 8)).pack(anchor='w')
+        # Lista de resultados (más compacta)
+        self._create_material_results_list(mat_frame)
         
-        # Lista de resultados
-        self._create_material_results_list(parent)
-        
-        # Botones de acción
-        self._create_material_action_buttons(parent)
+        # Botones de acción (más compactos)
+        self._create_material_action_buttons(mat_frame)
     
     def _create_material_results_list(self, parent):
         """Crea la lista de resultados de materiales"""
         results_frame = ttk.Frame(parent)
-        results_frame.pack(fill='both', expand=True, pady=5)
+        results_frame.pack(fill='both', expand=True, pady=(0, 5))
         
         scrollbar = ttk.Scrollbar(results_frame)
         scrollbar.pack(side='right', fill='y')
         
         self.mat_listbox = tk.Listbox(
-            results_frame, height=12, yscrollcommand=scrollbar.set,
+            results_frame, height=8, yscrollcommand=scrollbar.set,
             font=('Helvetica', 9)
         )
         self.mat_listbox.pack(fill='both', expand=True)
@@ -406,84 +492,117 @@ class QuoteEditor(tk.Toplevel):
     def _create_material_action_buttons(self, parent):
         """Crea los botones de acción para materiales"""
         btn_frame = ttk.Frame(parent)
-        btn_frame.pack(fill='x', pady=5)
+        btn_frame.pack(fill='x')
         
         add_btn = create_styled_button(
-            btn_frame, '➕ Añadir', self._add_selected_material, 'success'
+            btn_frame, '+ Añadir', self._add_selected_material, 'success'
         )
-        add_btn.pack(side='left', fill='x', expand=True, padx=2)
+        add_btn.pack(side='left', fill='x', expand=True, padx=(0, 3))
         
         new_btn = create_styled_button(
-            btn_frame, '📦 Nuevo', self._quick_add_material, 'primary'
+            btn_frame, 'Nuevo', self._quick_add_material, 'primary'
         )
-        new_btn.pack(side='right', fill='x', expand=True, padx=2)
+        new_btn.pack(side='right', fill='x', expand=True, padx=(3, 0))
     
-    def _create_right_panel(self):
+    def _create_right_panel(self, parent):
         """Crea el panel derecho con la lista de items"""
-        right_panel = ttk.Frame(self, padding=15)
-        right_panel.pack(side='right', fill='both', expand=True)
+        right_panel = ttk.Frame(parent, padding=10)
+        right_panel.grid(row=0, column=1, sticky='nsew', padx=(5, 10), pady=10)
         
-        ttk.Label(right_panel, text='Items del presupuesto', 
-                 font=('Helvetica', 12, 'bold')).pack(anchor='w', pady=(0,10))
+        # Configurar para que se expanda
+        right_panel.grid_rowconfigure(1, weight=1)
+        right_panel.grid_columnconfigure(0, weight=1)
         
-        # Tabla de items
-        columns = ('name', 'price', 'qty', 'total')
-        self.items_tree = ttk.Treeview(right_panel, columns=columns, show='headings', height=15)
+        # Título
+        title_label = ttk.Label(right_panel, text='Items del presupuesto', 
+                 font=('Helvetica', 12, 'bold'))
+        title_label.grid(row=0, column=0, sticky='w', pady=(0, 8))
         
-        self.items_tree.heading('name', text='Material')
-        self.items_tree.heading('price', text='Precio')
-        self.items_tree.heading('qty', text='Cantidad')
-        self.items_tree.heading('total', text='Total')
+        # Frame con borde visible para la tabla
+        border_canvas = tk.Canvas(right_panel, highlightthickness=2,
+                                 highlightbackground='#2B7DE9',
+                                 highlightcolor='#2B7DE9',
+                                 background='#FFFFFF')
+        border_canvas.grid(row=1, column=0, sticky='nsew', pady=(0, 8))
         
-        self.items_tree.column('name', width=250)
-        self.items_tree.column('price', width=80)
-        self.items_tree.column('qty', width=80)
-        self.items_tree.column('total', width=100)
+        tree_container = ttk.Frame(border_canvas)
+        tree_container.pack(fill='both', expand=True, padx=1, pady=1)
         
-        self.items_tree.pack(fill='both', expand=True, pady=(0,10))
+        # Tabla de items con columnas de ambos precios
+        columns = ('name', 'supplier_price', 'price', 'qty', 'total')
+        self.items_tree = ttk.Treeview(tree_container, columns=columns, show='headings')
         
-        # Doble click para editar
-        self.items_tree.bind('<Double-Button-1>', lambda e: self._edit_item())
+        self.items_tree.heading('name', text='Material', anchor='w')
+        self.items_tree.heading('supplier_price', text='P. Proveedor', anchor='w')
+        self.items_tree.heading('price', text='P. Venta', anchor='w')
+        self.items_tree.heading('qty', text='Cantidad', anchor='w')
+        self.items_tree.heading('total', text='Total', anchor='w')
         
-        # Botones de items
+        self.items_tree.column('name', width=200, anchor='w')
+        self.items_tree.column('supplier_price', width=100, anchor='w')
+        self.items_tree.column('price', width=80, anchor='w')
+        self.items_tree.column('qty', width=80, anchor='w')
+        self.items_tree.column('total', width=100, anchor='w')
+        
+        # Configurar tags para filas alternadas con mejor contraste
+        self.items_tree.tag_configure('oddrow', background='#FFFFFF')
+        self.items_tree.tag_configure('evenrow', background='#F0F4F8')
+        
+        self.items_tree.pack(side='left', fill='both', expand=True)
+        
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(tree_container, orient='vertical', command=self.items_tree.yview)
+        self.items_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side='right', fill='y')
+        
+        # Doble click para editar la celda
+        self.items_tree.bind('<Double-Button-1>', lambda e: self._edit_item_cell(e))
+        
+        # Botones de items (más compactos y ordenados)
         item_btns = ttk.Frame(right_panel)
-        item_btns.pack(fill='x', pady=(0, 10))
+        item_btns.grid(row=2, column=0, sticky='ew', pady=(0, 8))
         
         edit_btn = create_styled_button(item_btns, '✏️ Editar', self._edit_item, 'info')
-        edit_btn.pack(side='left', padx=5)
+        edit_btn.pack(side='left', padx=(0, 5))
         
         remove_btn = create_styled_button(item_btns, '🗑️ Quitar', self._remove_item, 'danger')
-        remove_btn.pack(side='left', padx=5)
+        remove_btn.pack(side='left')
         
-        # Resumen de totales
-        totals_frame = ttk.LabelFrame(right_panel, text='Resumen', padding=10)
-        totals_frame.pack(fill='x', pady=10)
+        # Resumen de totales (más compacto)
+        totals_frame = ttk.LabelFrame(right_panel, text='Resumen', padding=8)
+        totals_frame.grid(row=3, column=0, sticky='ew')
         
         self.total_label = ttk.Label(totals_frame, text='Total: 0.00 €', 
-                                   font=('Helvetica', 14, 'bold'))
+                                   font=('Helvetica', 12, 'bold'))
         self.total_label.pack()
     
     def _create_bottom_buttons(self):
         """Crea los botones principales de la ventana"""
-        bottom_frame = ttk.Frame(self, padding=15)
-        bottom_frame.pack(side='bottom', fill='x')
+        bottom_frame = ttk.Frame(self, padding=(10, 8))
+        bottom_frame.grid(row=1, column=0, sticky='ew')
+        
+        # Configurar grid para centrar
+        self.grid_rowconfigure(1, weight=0)
+        bottom_frame.grid_columnconfigure(0, weight=1)
+        bottom_frame.grid_columnconfigure(1, weight=0)
+        bottom_frame.grid_columnconfigure(2, weight=1)
         
         # Botón cancelar (izquierda)
         cancel_btn = create_styled_button(
-            bottom_frame, '❌ Cancelar', self.destroy, 'secondary'
+            bottom_frame, 'Cancelar', self.destroy, 'secondary'
         )
-        cancel_btn.pack(side='left', padx=5)
+        cancel_btn.grid(row=0, column=0, sticky='w', padx=5)
+        
+        # Texto de ayuda (centrado)
+        help_text = 'Ctrl+S: Guardar | Esc: Cancelar'
+        ttk.Label(bottom_frame, text=help_text, font=('Helvetica', 8), 
+                 foreground='gray').grid(row=0, column=1, padx=10)
         
         # Botón guardar (derecha, prominente)
         save_btn = create_styled_button(
             bottom_frame, '💾 GUARDAR PRESUPUESTO', self._save, 'success'
         )
-        save_btn.pack(side='right', padx=5, ipadx=20, ipady=10)
-        
-        # Texto de ayuda
-        help_text = '(Ctrl+S para guardar | Esc para cancelar)'
-        ttk.Label(bottom_frame, text=help_text, font=('Helvetica', 8), 
-                 foreground='gray').pack(side='right', padx=10)
+        save_btn.grid(row=0, column=2, sticky='e', padx=5, ipadx=15, ipady=5)
     
     def _setup_keyboard_shortcuts(self):
         """Configura los atajos de teclado"""
@@ -499,9 +618,69 @@ class QuoteEditor(tk.Toplevel):
         ClientEditor(self, client_id=None, on_save=self._reload_clients)
     
     def _reload_clients(self):
-        """Recarga la lista de clientes"""
+        """Recarga la lista de clientes después de añadir uno nuevo"""
         self.clients_list = db.list_clients()
-        self.client_cb['values'] = [c['name'] for c in self.clients_list]
+        self._filter_clients()
+    
+    def _filter_clients(self):
+        """Filtra la lista de clientes según la búsqueda"""
+        query = self.client_search_var.get().strip().lower()
+        
+        if not query:
+            self._show_all_clients()
+            return
+        
+        # Filtrar clientes
+        self.filtered_clients = []
+        for client in self.clients_list:
+            name = client['name'].lower()
+            dni = (client['dni'] or '').lower()
+            
+            if query in name or query in dni:
+                self.filtered_clients.append(client)
+        
+        # Mostrar resultados filtrados
+        self._show_filtered_clients()
+    
+    def _show_all_clients(self):
+        """Muestra todos los clientes"""
+        self.filtered_clients = self.clients_list.copy()
+        self.client_listbox.delete(0, tk.END)
+        
+        for client in self.filtered_clients:
+            display_text = client['name']
+            if client['dni']:
+                display_text += f" - {client['dni']}"
+            self.client_listbox.insert(tk.END, display_text)
+    
+    def _show_filtered_clients(self):
+        """Muestra los clientes filtrados"""
+        self.client_listbox.delete(0, tk.END)
+        
+        for client in self.filtered_clients:
+            display_text = client['name']
+            if client['dni']:
+                display_text += f" - {client['dni']}"
+            self.client_listbox.insert(tk.END, display_text)
+    
+    def _select_client(self):
+        """Selecciona el cliente de la lista"""
+        selection = self.client_listbox.curselection()
+        if not selection:
+            return
+        
+        idx = selection[0]
+        if idx >= len(self.filtered_clients):
+            return
+        
+        client = self.filtered_clients[idx]
+        self.selected_client = client
+        
+        # Actualizar el campo de búsqueda con el nombre seleccionado
+        self.client_search_var.set(client['name'])
+        
+        # Enfocar en el siguiente campo
+        self.work_name_entry.focus()
     
     def _quick_add_material(self):
         """Abre el editor para añadir un nuevo material"""
@@ -558,7 +737,11 @@ class QuoteEditor(tk.Toplevel):
         if matches:
             for score, material in matches[:20]:  # Limitar a 20 resultados
                 category = material['category'] or 'Sin categoría'
-                display = f"{material['name']} [{category}] - {material['price']:.2f}€"
+                try:
+                    supplier_price = material['supplier_price'] or 0
+                except (KeyError, IndexError):
+                    supplier_price = 0
+                display = f"{material['name']} [{category}] - Prov: {supplier_price:.2f}€ | Venta: {material['price']:.2f}€"
                 self.mat_listbox.insert(tk.END, display)
                 self.filtered_materials.append(material)
         else:
@@ -603,22 +786,22 @@ class QuoteEditor(tk.Toplevel):
         if material is None:  # Separador de categoría
             return
         
-        # Diálogo para cantidad
-        qty = simpledialog.askfloat(
-            'Cantidad', f'Cantidad de {material["name"]}:',
-            initialvalue=1.0, minvalue=0.01
-        )
-        if qty is None:
-            return
+        # Obtener precio de proveedor
+        try:
+            supplier_price = material['supplier_price'] or 0
+        except (KeyError, IndexError):
+            supplier_price = 0
         
-        # Añadir a la lista de items
+        # Añadir directamente con cantidad 1 y precio por defecto
         self.items_data.append({
             'material_id': material['id'],
             'name': material['name'],
             'description': material['description'],
             'image_path': material['image_path'],
-            'price': material['price'],
-            'quantity': qty
+            'price': material['price'],  # Precio de venta por defecto
+            'supplier_price': supplier_price,  # Precio del proveedor
+            'quantity': 1.0,  # Cantidad 1 por defecto
+            'original_price': material['price']  # Guardar precio original para comparación
         })
         
         self._refresh_items()
@@ -630,15 +813,21 @@ class QuoteEditor(tk.Toplevel):
         for item in self.items_tree.get_children():
             self.items_tree.delete(item)
         
-        # Añadir items actuales
+        # Añadir items actuales con filas alternadas
         for i, item in enumerate(self.items_data):
             total = item['price'] * item['quantity']
+            tag = 'evenrow' if i % 2 == 0 else 'oddrow'
+            
+            # Obtener precio de proveedor (items_data es dict, sí tiene .get())
+            supplier_price = item.get('supplier_price', 0) or 0
+            
             self.items_tree.insert('', 'end', iid=str(i), values=(
                 item['name'],
+                f"{supplier_price:.2f}",
                 f"{item['price']:.2f}",
                 item['quantity'],
                 f"{total:.2f}"
-            ))
+            ), tags=(tag,))
         
         self._update_totals()
     
@@ -657,25 +846,85 @@ class QuoteEditor(tk.Toplevel):
             text=f'Subtotal: {subtotal:.2f} € | Mano de obra: {labor_cost:.2f} € | TOTAL: {total:.2f} €'
         )
     
-    def _edit_item(self):
-        """Edita la cantidad del item seleccionado"""
-        selected = self.items_tree.selection()
-        if not selected:
+    def _edit_item_cell(self, event):
+        """Edita la celda clickeada directamente en el Treeview"""
+        region = self.items_tree.identify('region', event.x, event.y)
+        if region != 'cell':
             return
         
-        idx = int(selected[0])
+        column = self.items_tree.identify_column(event.x)
+        row_id = self.items_tree.identify_row(event.y)
+        
+        if not row_id:
+            return
+        
+        # Solo permitir editar columnas de precio de venta y cantidad
+        # #2=supplier_price (no editable aquí), #3=price (editable), #4=qty (editable)
+        if column not in ('#3', '#4'):  
+            return
+        
+        idx = int(row_id)
         item = self.items_data[idx]
         
-        new_qty = simpledialog.askfloat(
-            'Editar cantidad',
-            f'Nueva cantidad para {item["name"]}:',
-            initialvalue=item['quantity'],
-            minvalue=0.01
-        )
+        # Obtener el valor actual y el bbox de la celda
+        col_name = 'price' if column == '#3' else 'quantity'
+        current_value = item['price'] if column == '#3' else item['quantity']
         
-        if new_qty is not None:
-            self.items_data[idx]['quantity'] = new_qty
-            self._refresh_items()
+        # Obtener posición de la celda
+        bbox = self.items_tree.bbox(row_id, column)
+        if not bbox:
+            return
+        
+        # Crear Entry temporal sobre la celda
+        x, y, width, height = bbox
+        
+        entry_var = tk.StringVar(value=str(current_value))
+        # Usar tk.Entry en lugar de ttk.Entry para evitar problemas de visualización
+        entry = tk.Entry(self.items_tree, textvariable=entry_var, 
+                        font=('Segoe UI', 10), 
+                        relief='solid',
+                        borderwidth=2,
+                        justify='center')
+        entry.place(x=x, y=y, width=width, height=height)
+        entry.focus_set()
+        entry.select_range(0, tk.END)
+        entry.icursor(tk.END)  # Colocar cursor al final
+        
+        def save_edit(event=None):
+            try:
+                new_value = float(entry_var.get())
+                if new_value < 0:
+                    raise ValueError()
+                
+                if column == '#3':  # Precio de venta
+                    self.items_data[idx]['price'] = new_value
+                    # Actualizar precio original si no existía
+                    if 'original_price' not in self.items_data[idx]:
+                        self.items_data[idx]['original_price'] = item['price']
+                else:  # Cantidad
+                    if new_value == 0:
+                        raise ValueError()
+                    self.items_data[idx]['quantity'] = new_value
+                
+                self._refresh_items()
+            except ValueError:
+                messagebox.showerror('Error', 'Valor inválido')
+            finally:
+                entry.destroy()
+        
+        def cancel_edit(event=None):
+            entry.destroy()
+        
+        entry.bind('<Return>', save_edit)
+        entry.bind('<Escape>', cancel_edit)
+        entry.bind('<FocusOut>', save_edit)
+    
+    def _edit_item(self):
+        """Mensaje informativo para usar doble click"""
+        messagebox.showinfo(
+            'Editar items',
+            'Para editar precio o cantidad, haz doble click directamente sobre el valor que quieres cambiar.'
+        )
     
     def _remove_item(self):
         """Elimina el item seleccionado"""
@@ -700,7 +949,20 @@ class QuoteEditor(tk.Toplevel):
         
         # Cargar información del presupuesto
         if quote['client_name']:
-            self.client_cb.set(quote['client_name'])
+            self.client_search_var.set(quote['client_name'])
+            # Buscar el cliente en la lista para seleccionarlo
+            for client in self.clients_list:
+                if client['name'] == quote['client_name']:
+                    self.selected_client = client
+                    break
+        
+        # Cargar work_name de forma segura
+        try:
+            if quote['work_name']:
+                self.work_name_entry.delete(0, tk.END)
+                self.work_name_entry.insert(0, quote['work_name'])
+        except (KeyError, IndexError):
+            pass  # La columna no existe en presupuestos antiguos
         
         if quote['labor_cost']:
             self.labor_entry.delete(0, tk.END)
@@ -708,13 +970,21 @@ class QuoteEditor(tk.Toplevel):
         
         # Cargar items
         for item in items:
+            # Obtener precio de proveedor
+            try:
+                supplier_price = item['supplier_price'] or 0
+            except (KeyError, IndexError):
+                supplier_price = 0
+            
             self.items_data.append({
                 'material_id': item['material_id'],
                 'name': item['name'],
                 'description': item['description'],
                 'image_path': item['image_path'],
                 'price': item['unit_price'],
-                'quantity': item['quantity']
+                'supplier_price': supplier_price,
+                'quantity': item['quantity'],
+                'original_price': item['unit_price']  # Guardar precio original
             })
         
         self._refresh_items()
@@ -722,10 +992,10 @@ class QuoteEditor(tk.Toplevel):
     def _save(self):
         """Valida y guarda el presupuesto"""
         # Validar cliente
-        client_name = self.client_cb.get().strip()
+        client_name = self.client_search_var.get().strip()
         if not client_name:
             messagebox.showerror('Error', 'Selecciona un cliente')
-            self.client_cb.focus()
+            self.client_entry.focus()
             return
         
         # Validar items
@@ -733,18 +1003,21 @@ class QuoteEditor(tk.Toplevel):
             messagebox.showerror('Error', 'Añade al menos un item')
             return
         
-        # Buscar información del cliente
-        client = None
-        for c in self.clients_list:
-            if c['name'] == client_name:
-                client = c
-                break
+        # Usar el cliente seleccionado si existe, sino buscar por nombre
+        client = self.selected_client
+        if not client:
+            # Buscar por nombre escrito
+            for c in self.clients_list:
+                if c['name'].lower() == client_name.lower():
+                    client = c
+                    break
         
         if client:
             client_id = client['id']
             client_address = client['address']
             client_dni = client['dni']
         else:
+            # Cliente no encontrado, usar el nombre tal cual
             client_id = None
             client_address = ''
             client_dni = ''
@@ -759,13 +1032,16 @@ class QuoteEditor(tk.Toplevel):
             self.labor_entry.focus()
             return
         
+        # Obtener nombre de obra
+        work_name = self.work_name_entry.get().strip() or None
+        
         try:
             # Crear o actualizar presupuesto
             if self.quote_id:
                 # Actualizar presupuesto existente
                 db.update_quote(
                     self.quote_id, client_id, client_name, 
-                    client_address, client_dni, labor_cost=labor_cost
+                    client_address, client_dni, work_name=work_name, labor_cost=labor_cost
                 )
                 # Eliminar items antiguos y añadir nuevos
                 quote, old_items = db.get_quote(self.quote_id)
@@ -776,25 +1052,53 @@ class QuoteEditor(tk.Toplevel):
                 # Crear nuevo presupuesto
                 quote_id = db.create_quote(
                     client_id, client_name, client_address, 
-                    client_dni, labor_cost=labor_cost
+                    client_dni, work_name=work_name, labor_cost=labor_cost
                 )
             
-            # Añadir items
+            # Añadir items y actualizar precios en BD si han cambiado
             for item in self.items_data:
+                # Obtener precio de proveedor (items_data es dict, sí tiene .get())
+                supplier_price = item.get('supplier_price', 0) or 0
+                
                 db.add_quote_item(
                     quote_id, item['material_id'], item['name'],
                     item['description'], item['image_path'],
-                    item['price'], item['quantity']
+                    item['price'], item['quantity'], supplier_price
                 )
+                
+                # Actualizar precio del material en BD si ha cambiado
+                if item['material_id']:
+                    original_price = item.get('original_price', item['price'])
+                    if item['price'] != original_price:
+                        # Obtener material actual de la BD
+                        material = db.get_material(item['material_id'])
+                        if material:
+                            # Actualizar solo el precio de venta, manteniendo otros campos
+                            try:
+                                material_supplier_price = material['supplier_price'] or 0
+                            except (KeyError, IndexError):
+                                material_supplier_price = 0
+                            db.update_material(
+                                item['material_id'],
+                                material['name'],
+                                material['description'],
+                                material['image_path'],
+                                item['price'],  # Nuevo precio de venta
+                                material['category'],
+                                material_supplier_price  # Mantener precio de proveedor
+                            )
             
             action = 'actualizado' if self.quote_id else 'creado'
-            messagebox.showinfo('Éxito', f'Presupuesto #{quote_id} {action}')
             
             # Callback de actualización
             if self.on_save:
                 self.on_save()
             
+            # Cerrar la ventana primero
             self.destroy()
+            
+            # Mostrar mensaje después de cerrar (se muestra en la ventana padre)
+            messagebox.showinfo('Éxito', f'Presupuesto #{quote_id} {action}')
             
         except Exception as e:
             messagebox.showerror('Error', f'Error al guardar: {str(e)}')

@@ -85,12 +85,11 @@ class ModernApp:
         self._create_modern_status_bar()
     
     def _create_modern_header(self):
-        """Crea el header moderno con logo y gradiente"""
+        """Crea el header moderno"""
         self.header_frame = create_modern_header(
             self.root, 
             COMPANY_NAME, 
-            f"{ICONS['company']}",
-            show_logo=True
+            None  # Sin subtítulo
         )
     
     def _create_modern_actions(self):

@@ -15,13 +15,14 @@ class AssetManager:
         """Asegura que el directorio de assets existe"""
         ASSETS_DIR.mkdir(exist_ok=True)
     
-    def load_logo(self, width=None, height=None):
+    def load_logo(self, width=None, height=None, background_color=None):
         """
         Carga el logo de la empresa
         
         Args:
             width: Ancho deseado en píxeles
             height: Alto deseado en píxeles
+            background_color: Color de fondo hex (ej: '#2B7DE9') para componer sobre él
             
         Returns:
             ImageTk.PhotoImage o None si no se puede cargar
@@ -33,14 +34,18 @@ class AssetManager:
             return self._create_default_logo(width or 80, height or 60)
         
         try:
-            # Crear clave de cache
-            cache_key = f"logo_{width}_{height}"
+            # Crear clave de cache incluyendo background
+            cache_key = f"logo_{width}_{height}_{background_color}"
             
             if cache_key in self._image_cache:
                 return self._image_cache[cache_key]
             
             # Cargar y redimensionar imagen
             image = Image.open(logo_path)
+            
+            # Asegurar que la imagen tiene canal alpha (transparencia)
+            if image.mode != 'RGBA':
+                image = image.convert('RGBA')
             
             if width or height:
                 # Mantener proporción si solo se especifica una dimensión
@@ -51,9 +56,22 @@ class AssetManager:
                     ratio = height / image.height
                     width = int(image.width * ratio)
                 
+                # Redimensionar manteniendo transparencia
                 image = image.resize((width, height), Image.Resampling.LANCZOS)
             
-            # Convertir a PhotoImage
+            # Si se proporciona color de fondo, componer la imagen sobre él
+            if background_color:
+                # Convertir color hex a RGB
+                bg_color = tuple(int(background_color.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+                
+                # Crear imagen de fondo
+                background = Image.new('RGB', image.size, bg_color)
+                
+                # Componer el logo sobre el fondo
+                background.paste(image, (0, 0), image)  # El tercer parámetro es la máscara alpha
+                image = background
+            
+            # Convertir a PhotoImage manteniendo transparencia
             photo = ImageTk.PhotoImage(image)
             
             # Guardar en cache

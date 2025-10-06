@@ -3,7 +3,7 @@ Configuración global de la aplicación
 """
 from pathlib import Path
 
-COMPANY_NAME = "Barajas Peña"
+COMPANY_NAME = "Barajas Peña SL"
 BRAND_COLOR_PRIMARY = "#2B7DE9"
 BRAND_COLOR_SECONDARY = "#5BA3F5"
 BRAND_COLOR_ACCENT = "#1E5CBE"

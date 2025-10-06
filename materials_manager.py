@@ -2,9 +2,9 @@
 Gestión de materiales - Interface y lógica
 """
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, messagebox
 import db
-from config import MATERIAL_EDITOR_SIZE, IMAGE_FILETYPES
+from config import MATERIAL_EDITOR_SIZE
 from ui_utils import (
     center_window, create_styled_button, create_search_frame, 
     create_treeview_with_scrollbar, create_button_frame, 
@@ -29,9 +29,9 @@ class MaterialsFrame(ttk.Frame):
         search_frame, search_entry = create_search_frame(self, self.search_var)
         
         # Tabla de materiales
-        columns = ('name', 'category', 'desc', 'price')
-        headings = ('Nombre', 'Categoría', 'Descripción', 'Precio (€)')
-        column_widths = (180, 120, 250, 100)
+        columns = ('name', 'category', 'desc', 'supplier_price', 'price')
+        headings = ('Nombre', 'Categoría', 'Descripción', 'P. Proveedor (€)', 'P. Venta (€)')
+        column_widths = (150, 100, 200, 120, 100)
         
         tree_frame, self.tree = create_treeview_with_scrollbar(
             self, columns, headings, column_widths
@@ -59,24 +59,35 @@ class MaterialsFrame(ttk.Frame):
         search_term = self.search_var.get().lower()
         materials = db.list_materials()
         
+        row_count = 0
         for material in materials:
-            category = material['category'] or 'Sin categoría'
-            description = (material['description'] or '')[:50]
-            
             # Aplicar filtro de búsqueda
             if search_term:
-                if (search_term not in material['name'].lower() and
-                    search_term not in description.lower() and
-                    search_term not in category.lower()):
+                name = material['name'].lower()
+                desc = (material['description'] or '').lower()
+                category = (material['category'] or '').lower()
+                if search_term not in name and search_term not in desc and search_term not in category:
                     continue
+            
+            # Alternar colores de filas
+            tag = 'evenrow' if row_count % 2 == 0 else 'oddrow'
+            
+            # Obtener precio de proveedor
+            try:
+                supplier_price = material['supplier_price'] or 0
+            except (KeyError, IndexError):
+                supplier_price = 0
             
             # Añadir item al árbol
             self.tree.insert('', 'end', iid=str(material['id']), values=(
                 material['name'],
-                category,
-                description,
+                material['category'] or 'Sin categoría',
+                material['description'] or '',
+                f"{supplier_price:.2f}",
                 f"{material['price']:.2f}"
-            ))
+            ), tags=(tag,))
+            
+            row_count += 1
     
     def add(self):
         """Abre el editor para añadir un nuevo material"""
@@ -152,16 +163,19 @@ class MaterialEditor(tk.Toplevel):
             height=5, width=40, font=('Helvetica', 10)
         )
         
+        self.supplier_price_entry = create_form_field(
+            form, 'Precio Proveedor (€)', 'entry', row=2,
+            width=20, font=('Helvetica', 11)
+        )
+        self.supplier_price_entry.insert(0, '0')
+        
         self.price_entry = create_form_field(
-            form, 'Precio (€) *', 'entry', row=2,
+            form, 'Precio Venta (€) *', 'entry', row=3,
             width=20, font=('Helvetica', 11)
         )
         
         # Campo de categoría con combobox editable
         self._setup_category_field(form)
-        
-        # Campo de imagen
-        self._setup_image_field(form)
         
         form.columnconfigure(1, weight=1)
         
@@ -171,45 +185,158 @@ class MaterialEditor(tk.Toplevel):
     def _setup_category_field(self, parent):
         """Configura el campo de categoría"""
         ttk.Label(parent, text='Categoría', font=('Helvetica', 10, 'bold')).grid(
-            row=3, column=0, sticky='w', pady=5
+            row=4, column=0, sticky='w', pady=5
         )
         
         cat_frame = ttk.Frame(parent)
-        cat_frame.grid(row=3, column=1, pady=5, sticky='ew')
+        cat_frame.grid(row=4, column=1, pady=5, sticky='ew')
         
         # Obtener categorías existentes
-        categories = db.get_categories() or ['Sin categoría']
+        self.all_categories = db.get_categories() or ['Sin categoría']
         
-        self.category_combo = ttk.Combobox(
-            cat_frame, values=categories, width=37, 
-            font=('Helvetica', 11), state='normal'
+        # Crear el Entry (en lugar de Combobox) para mejor control
+        self.category_var = tk.StringVar()
+        self.category_var.set('Sin categoría')
+        
+        self.category_entry = ttk.Entry(
+            cat_frame, textvariable=self.category_var, width=37, 
+            font=('Helvetica', 11)
         )
-        self.category_combo.pack(side='left', fill='x', expand=True)
-        self.category_combo.set('Sin categoría')
+        self.category_entry.pack(side='left', fill='x', expand=True)
+        
+        # Bind para mostrar sugerencias
+        self.category_entry.bind('<KeyRelease>', self._on_category_keyrelease)
+        self.category_entry.bind('<FocusIn>', self._on_category_focus)
+        self.category_entry.bind('<FocusOut>', self._on_category_focus_out)
         
         # Ícono informativo
         ttk.Label(cat_frame, text='💡', font=('Helvetica', 8)).pack(side='right', padx=2)
         
+        # Crear listbox para sugerencias (inicialmente oculto)
+        self.suggestions_listbox = None
+        self.suggestions_window = None
+        
         # Texto de ayuda
-        help_text = 'Escribe una nueva categoría o selecciona una existente'
+        help_text = 'Escribe una categoría (se sugerirán existentes)'
         ttk.Label(parent, text=help_text, font=('Helvetica', 8), 
-                 foreground='gray').grid(row=4, column=1, sticky='w')
+                 foreground='gray').grid(row=5, column=1, sticky='w')
     
-    def _setup_image_field(self, parent):
-        """Configura el campo de imagen"""
-        ttk.Label(parent, text='Imagen', font=('Helvetica', 10, 'bold')).grid(
-            row=5, column=0, sticky='w', pady=5
+    def _on_category_keyrelease(self, event=None):
+        """Maneja el evento de soltar tecla en el campo de categoría"""
+        # Ignorar teclas especiales
+        if event and event.keysym in ('Shift_L', 'Shift_R', 'Control_L', 'Control_R', 
+                                       'Alt_L', 'Alt_R', 'Caps_Lock', 'Tab', 'Escape'):
+            return
+        
+        # Si presiona Down, navegar en la lista de sugerencias
+        if event and event.keysym == 'Down':
+            if self.suggestions_listbox and self.suggestions_listbox.winfo_viewable():
+                self.suggestions_listbox.focus_set()
+                self.suggestions_listbox.selection_set(0)
+            return
+        
+        # Si presiona Return, cerrar sugerencias
+        if event and event.keysym in ('Return', 'KP_Enter'):
+            self._hide_suggestions()
+            return
+        
+        # Mostrar sugerencias filtradas
+        self._show_filtered_suggestions()
+    
+    def _on_category_focus(self, event=None):
+        """Muestra sugerencias cuando el campo recibe foco"""
+        self._show_filtered_suggestions()
+    
+    def _on_category_focus_out(self, event=None):
+        """Oculta sugerencias cuando el campo pierde foco"""
+        # Usar after para dar tiempo a hacer clic en la lista
+        self.after(200, self._hide_suggestions)
+    
+    def _show_filtered_suggestions(self):
+        """Muestra las sugerencias filtradas"""
+        typed = self.category_var.get().lower().strip()
+        
+        # Filtrar categorías
+        if typed == '':
+            filtered = self.all_categories
+        else:
+            filtered = [cat for cat in self.all_categories 
+                       if typed in cat.lower()]
+        
+        # Si no hay sugerencias relevantes, no mostrar nada
+        if not filtered or (len(filtered) == 1 and filtered[0].lower() == typed):
+            self._hide_suggestions()
+            return
+        
+        # Crear o actualizar el listbox de sugerencias
+        if not self.suggestions_window:
+            self._create_suggestions_window()
+        
+        # Limpiar y llenar con sugerencias
+        self.suggestions_listbox.delete(0, tk.END)
+        for cat in filtered[:10]:  # Máximo 10 sugerencias
+            self.suggestions_listbox.insert(tk.END, cat)
+        
+        # Mostrar la ventana de sugerencias
+        self._position_suggestions_window()
+        self.suggestions_window.deiconify()
+    
+    def _create_suggestions_window(self):
+        """Crea la ventana flotante de sugerencias"""
+        # Crear ventana toplevel sin decoraciones
+        self.suggestions_window = tk.Toplevel(self)
+        self.suggestions_window.wm_overrideredirect(True)
+        self.suggestions_window.withdraw()
+        
+        # Crear listbox
+        self.suggestions_listbox = tk.Listbox(
+            self.suggestions_window,
+            height=5,
+            font=('Helvetica', 10),
+            relief='solid',
+            borderwidth=1
         )
+        self.suggestions_listbox.pack(fill='both', expand=True)
         
-        img_frame = ttk.Frame(parent)
-        img_frame.grid(row=5, column=1, pady=5, sticky='ew')
+        # Bind para seleccionar con clic o Enter
+        self.suggestions_listbox.bind('<Button-1>', self._on_suggestion_click)
+        self.suggestions_listbox.bind('<Return>', self._on_suggestion_select)
+        self.suggestions_listbox.bind('<Double-Button-1>', self._on_suggestion_select)
+    
+    def _position_suggestions_window(self):
+        """Posiciona la ventana de sugerencias debajo del entry"""
+        # Actualizar geometría
+        self.update_idletasks()
         
-        self.img_path_var = tk.StringVar()
-        ttk.Entry(img_frame, textvariable=self.img_path_var, 
-                 state='readonly').pack(side='left', fill='x', expand=True)
+        # Obtener posición del entry
+        x = self.category_entry.winfo_rootx()
+        y = self.category_entry.winfo_rooty() + self.category_entry.winfo_height()
+        width = self.category_entry.winfo_width()
         
-        ttk.Button(img_frame, text='📁', command=self._choose_image, 
-                  width=3).pack(side='right', padx=5)
+        # Posicionar la ventana
+        self.suggestions_window.geometry(f'{width}x100+{x}+{y}')
+    
+    def _on_suggestion_click(self, event=None):
+        """Maneja el clic en una sugerencia"""
+        # Esperar un momento para que se complete la selección
+        self.after(50, self._on_suggestion_select)
+    
+    def _on_suggestion_select(self, event=None):
+        """Selecciona la sugerencia actual"""
+        if not self.suggestions_listbox:
+            return
+        
+        selection = self.suggestions_listbox.curselection()
+        if selection:
+            selected_text = self.suggestions_listbox.get(selection[0])
+            self.category_var.set(selected_text)
+            self._hide_suggestions()
+            self.category_entry.focus_set()
+    
+    def _hide_suggestions(self):
+        """Oculta la ventana de sugerencias"""
+        if self.suggestions_window:
+            self.suggestions_window.withdraw()
     
     def _setup_buttons(self):
         """Configura los botones de acción"""
@@ -234,12 +361,6 @@ class MaterialEditor(tk.Toplevel):
         }
         bind_keyboard_shortcuts(self, shortcuts)
     
-    def _choose_image(self):
-        """Abre el diálogo para seleccionar una imagen"""
-        file_path = filedialog.askopenfilename(filetypes=IMAGE_FILETYPES)
-        if file_path:
-            self.img_path_var.set(file_path)
-    
     def _load_data(self):
         """Carga los datos del material si está editando"""
         if not self.material_id:
@@ -257,11 +378,16 @@ class MaterialEditor(tk.Toplevel):
         
         self.price_entry.insert(0, str(material['price']))
         
-        if material['category']:
-            self.category_combo.set(material['category'])
+        # Cargar precio de proveedor
+        try:
+            supplier_price = material['supplier_price'] or 0
+        except (KeyError, IndexError):
+            supplier_price = 0
+        self.supplier_price_entry.delete(0, tk.END)
+        self.supplier_price_entry.insert(0, str(supplier_price))
         
-        if material['image_path']:
-            self.img_path_var.set(material['image_path'])
+        if material['category']:
+            self.category_var.set(material['category'])
     
     def _save(self):
         """Valida y guarda el material"""
@@ -275,29 +401,38 @@ class MaterialEditor(tk.Toplevel):
         # Obtener descripción
         description = self.description_text.get('1.0', 'end').strip()
         
-        # Validar precio
+        # Validar precio de proveedor
+        try:
+            supplier_price = float(self.supplier_price_entry.get())
+            if supplier_price < 0:
+                raise ValueError()
+        except ValueError:
+            messagebox.showerror('Error', 'Precio de proveedor inválido (debe ser ≥ 0)')
+            self.supplier_price_entry.focus()
+            return
+        
+        # Validar precio de venta
         try:
             price = float(self.price_entry.get())
             if price < 0:
                 raise ValueError()
         except ValueError:
-            messagebox.showerror('Error', 'Precio inválido (debe ser ≥ 0)')
+            messagebox.showerror('Error', 'Precio de venta inválido (debe ser ≥ 0)')
             self.price_entry.focus()
             return
         
         # Obtener datos adicionales
-        image_path = self.img_path_var.get() or None
-        category = self.category_combo.get().strip() or 'Sin categoría'
+        category = self.category_var.get().strip() or 'Sin categoría'
         
-        # Guardar en base de datos
+        # Guardar en base de datos (image_path siempre None)
         try:
             if self.material_id:
                 db.update_material(
                     self.material_id, name, description, 
-                    image_path, price, category
+                    None, price, category, supplier_price
                 )
             else:
-                db.add_material(name, description, image_path, price, category)
+                db.add_material(name, description, None, price, category, supplier_price)
             
             # Callback de actualización
             if self.on_save:

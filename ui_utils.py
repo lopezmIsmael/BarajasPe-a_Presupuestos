@@ -138,23 +138,41 @@ def create_search_frame(parent, search_var, placeholder_text="🔍 Buscar:"):
 
 
 def create_treeview_with_scrollbar(parent, columns, headings, column_widths=None):
-    """Crea un treeview con scrollbar"""
-    tree_frame = ttk.Frame(parent)
-    tree_frame.pack(fill='both', expand=True, padx=10, pady=5)
+    """Crea un treeview con scrollbar, borde visible y estilos mejorados"""
+    # Frame exterior con padding
+    outer_frame = ttk.Frame(parent)
+    outer_frame.pack(fill='both', expand=True, padx=10, pady=5)
+    
+    # Frame interior con borde visible usando Canvas
+    border_canvas = tk.Canvas(outer_frame, highlightthickness=3, 
+                             highlightbackground='#2B7DE9',  # Borde azul visible
+                             highlightcolor='#2B7DE9',
+                             background='#FFFFFF')
+    border_canvas.pack(fill='both', expand=True)
+    
+    # Frame contenedor para el treeview dentro del canvas
+    tree_frame = ttk.Frame(border_canvas)
+    tree_frame.pack(fill='both', expand=True, padx=2, pady=2)
     
     tree = ttk.Treeview(tree_frame, columns=columns, show='headings', height=15)
     
     for i, (col, heading) in enumerate(zip(columns, headings)):
-        tree.heading(col, text=heading)
+        tree.heading(col, text=heading, anchor='w')
         if column_widths and i < len(column_widths):
-            tree.column(col, width=column_widths[i])
+            tree.column(col, width=column_widths[i], anchor='w')
+        else:
+            tree.column(col, anchor='w')
+    
+    # Configurar tags para filas alternadas con bordes visibles
+    tree.tag_configure('oddrow', background='#FFFFFF')
+    tree.tag_configure('evenrow', background='#F0F4F8')  # Gris más visible
     
     scrollbar = ttk.Scrollbar(tree_frame, orient='vertical', command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
     tree.pack(side='left', fill='both', expand=True)
     scrollbar.pack(side='right', fill='y')
     
-    return tree_frame, tree
+    return outer_frame, tree
 
 
 def create_button_frame(parent, buttons_config):

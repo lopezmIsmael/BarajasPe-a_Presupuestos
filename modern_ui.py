@@ -143,20 +143,43 @@ class ModernStyleManager:
                            foreground=BRAND_COLOR_TEXT,
                            borderwidth=2,
                            arrowcolor=BRAND_COLOR_PRIMARY)
+        
+        # Estilos mejorados para Treeview con bordes muy visibles
+        self.style.configure('Treeview',
+                           background='#FFFFFF',  # Fondo blanco puro
+                           foreground='#000000',  # Texto negro puro para máximo contraste
+                           fieldbackground='#FFFFFF',
+                           font=('Segoe UI', 10),
+                           rowheight=32,  # Filas más altas
+                           borderwidth=0)  # Sin borde en el treeview, lo pondremos en el frame
+        
+        self.style.configure('Treeview.Heading',
+                           background=BRAND_COLOR_PRIMARY,
+                           foreground='white',
+                           font=('Segoe UI', 10, 'bold'),
+                           borderwidth=1,
+                           relief='solid')
+        
+        self.style.map('Treeview.Heading',
+                      background=[('active', BRAND_COLOR_SECONDARY),
+                                ('pressed', BRAND_COLOR_ACCENT)])
+        
+        # Alternar colores de filas para mejor legibilidad
+        self.style.map('Treeview',
+                      background=[('selected', BRAND_COLOR_PRIMARY),
+                                ('active', BRAND_COLOR_LIGHT)],
+                      foreground=[('selected', 'white'),
+                                ('active', '#000000')])
 
 
-def create_modern_header(parent, title, subtitle=None, show_logo=True):
+def create_modern_header(parent, title="Sistema de Presupuestos", subtitle="Barajas Peña SL"):
     """
-    Crea un header moderno con gradiente y logo
+    Crea un header moderno con título
     
     Args:
         parent: Widget padre
         title: Título principal
-        subtitle: Subtítulo opcional
-        show_logo: Si mostrar el logo
-    
-    Returns:
-        Frame del header
+        subtitle: Subtítulo (nombre de la empresa)
     """
     # Frame principal con fondo de marca
     header_frame = ttk.Frame(parent, style='Header.TFrame')
@@ -166,34 +189,9 @@ def create_modern_header(parent, title, subtitle=None, show_logo=True):
     content_frame = ttk.Frame(header_frame, style='Header.TFrame')
     content_frame.pack(fill='x', padx=HEADER_PADDING[0], pady=HEADER_PADDING[1])
     
-    # Frame izquierdo para logo y texto
+    # Frame izquierdo para texto
     left_frame = ttk.Frame(content_frame, style='Header.TFrame')
     left_frame.pack(side='left', fill='y')
-    
-    # Logo (si se solicita y está disponible)
-    if show_logo:
-        try:
-            # Intentar cargar logo
-            logo_frame = ttk.Frame(left_frame, style='Header.TFrame')
-            logo_frame.pack(side='left', padx=(0, 20))
-            
-            # Canvas para crear un logo simple con texto
-            logo_canvas = tk.Canvas(logo_frame, width=80, height=60, 
-                                  background=BRAND_COLOR_PRIMARY, 
-                                  highlightthickness=0)
-            logo_canvas.pack()
-            
-            # Crear logo con gradiente simple
-            logo_canvas.create_rectangle(5, 5, 75, 55, 
-                                       fill='white', outline=BRAND_COLOR_SECONDARY, width=2)
-            logo_canvas.create_text(40, 20, text='BP', 
-                                  fill=BRAND_COLOR_PRIMARY, 
-                                  font=('Segoe UI', 16, 'bold'))
-            logo_canvas.create_text(40, 40, text=ICONS['company'], 
-                                  font=('Segoe UI', 14))
-            
-        except Exception as e:
-            print(f"No se pudo crear logo: {e}")
     
     # Frame para títulos
     title_frame = ttk.Frame(left_frame, style='Header.TFrame')
@@ -212,11 +210,8 @@ def create_modern_header(parent, title, subtitle=None, show_logo=True):
     right_frame = ttk.Frame(content_frame, style='Header.TFrame')
     right_frame.pack(side='right', fill='y')
     
-    # Información de construcción profesional
-    info_label = ttk.Label(right_frame, 
-                          text=f"{ICONS['company']}",
-                          style='Subheader.TLabel')
-    info_label.pack(anchor='e')
+    # Se puede añadir información adicional aquí en el futuro si se necesita
+    # Por ahora lo dejamos vacío para un diseño más limpio
     
     # Línea separadora elegante
     separator_frame = ttk.Frame(parent)
@@ -350,7 +345,7 @@ def create_modern_statusbar(parent, initial_text="Listo"):
     
     # Información adicional a la derecha
     info_label = ttk.Label(content_frame, 
-                         text=f"Powered by {COMPANY_NAME}",
+                         text=f"Powered by Smarthive",
                          font=('Segoe UI', 8), foreground='#ADB5BD')
     info_label.pack(side='right')
     

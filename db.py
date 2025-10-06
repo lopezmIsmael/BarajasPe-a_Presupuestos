@@ -12,6 +12,31 @@ def get_conn():
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
+    
+    # Migración: Añadir columna work_name si no existe
+    try:
+        cur.execute("SELECT work_name FROM quotes LIMIT 1")
+    except sqlite3.OperationalError:
+        # La columna no existe, añadirla
+        cur.execute("ALTER TABLE quotes ADD COLUMN work_name TEXT")
+        conn.commit()
+    
+    # Migración: Añadir columna supplier_price a materials si no existe
+    try:
+        cur.execute("SELECT supplier_price FROM materials LIMIT 1")
+    except sqlite3.OperationalError:
+        # La columna no existe, añadirla
+        cur.execute("ALTER TABLE materials ADD COLUMN supplier_price REAL DEFAULT 0")
+        conn.commit()
+    
+    # Migración: Añadir columna supplier_price a quote_items si no existe
+    try:
+        cur.execute("SELECT supplier_price FROM quote_items LIMIT 1")
+    except sqlite3.OperationalError:
+        # La columna no existe, añadirla
+        cur.execute("ALTER TABLE quote_items ADD COLUMN supplier_price REAL DEFAULT 0")
+        conn.commit()
+    
     cur.execute('''
     CREATE TABLE IF NOT EXISTS materials (
         id INTEGER PRIMARY KEY,
@@ -19,6 +44,7 @@ def init_db():
         description TEXT,
         image_path TEXT,
         price REAL NOT NULL DEFAULT 0,
+        supplier_price REAL DEFAULT 0,
         category TEXT DEFAULT "Sin categoría"
     )
     ''')
@@ -43,6 +69,7 @@ def init_db():
         client_name TEXT,
         client_address TEXT,
         client_dni TEXT,
+        work_name TEXT,
         date TEXT,
         labor_cost REAL DEFAULT 0,
         notes TEXT,
@@ -60,6 +87,7 @@ def init_db():
         description TEXT,
         image_path TEXT,
         unit_price REAL NOT NULL,
+        supplier_price REAL DEFAULT 0,
         quantity REAL NOT NULL,
         FOREIGN KEY(quote_id) REFERENCES quotes(id),
         FOREIGN KEY(material_id) REFERENCES materials(id)
@@ -70,21 +98,27 @@ def init_db():
     conn.close()
 
 ### Materials CRUD
-def add_material(name, description, image_path, price, category="Sin categoría"):
+def add_material(name, description, image_path, price, category="Sin categoría", supplier_price=0):
+    # Normalizar categoría para evitar duplicados con diferente capitalización
+    normalized_category = normalize_category(category)
+    
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute('INSERT INTO materials (name,description,image_path,price,category) VALUES (?,?,?,?,?)',
-                (name, description, image_path, price, category))
+    cur.execute('INSERT INTO materials (name,description,image_path,price,supplier_price,category) VALUES (?,?,?,?,?,?)',
+                (name, description, image_path, price, supplier_price, normalized_category))
     conn.commit()
     mid = cur.lastrowid
     conn.close()
     return mid
 
-def update_material(mid, name, description, image_path, price, category="Sin categoría"):
+def update_material(mid, name, description, image_path, price, category="Sin categoría", supplier_price=0):
+    # Normalizar categoría para evitar duplicados con diferente capitalización
+    normalized_category = normalize_category(category)
+    
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute('UPDATE materials SET name=?,description=?,image_path=?,price=?,category=? WHERE id=?',
-                (name, description, image_path, price, category, mid))
+    cur.execute('UPDATE materials SET name=?,description=?,image_path=?,price=?,supplier_price=?,category=? WHERE id=?',
+                (name, description, image_path, price, supplier_price, normalized_category, mid))
     conn.commit()
     conn.close()
 
@@ -133,6 +167,27 @@ def get_categories():
     conn.close()
     return [r['category'] for r in rows]
 
+def normalize_category(category):
+    """Normaliza la categoría para que coincida con una existente (case-insensitive)"""
+    if not category or category.strip() == '':
+        return 'Sin categoría'
+    
+    category_input = category.strip()
+    
+    # Obtener todas las categorías existentes
+    existing_categories = get_categories()
+    
+    # Crear un mapeo de lowercase a la versión original
+    category_map = {cat.lower(): cat for cat in existing_categories if cat}
+    
+    # Buscar coincidencia case-insensitive
+    category_lower = category_input.lower()
+    if category_lower in category_map:
+        return category_map[category_lower]
+    
+    # Si no existe, devolver la versión con capitalización del usuario
+    return category_input
+
 ### Clients CRUD
 def add_client(name, address, dni, phone, email):
     conn = get_conn()
@@ -176,24 +231,24 @@ def get_client(cid):
     return row
 
 ### Quotes
-def create_quote(client_id, client_name, client_address, client_dni, labor_cost=0, notes=None):
+def create_quote(client_id, client_name, client_address, client_dni, work_name=None, labor_cost=0, notes=None):
     conn = get_conn()
     cur = conn.cursor()
     date = datetime.date.today().isoformat()
-    cur.execute('''INSERT INTO quotes (client_id,client_name,client_address,client_dni,date,labor_cost,notes)
-                   VALUES (?,?,?,?,?,?,?)''',
-                (client_id, client_name, client_address, client_dni, date, labor_cost, notes))
+    cur.execute('''INSERT INTO quotes (client_id,client_name,client_address,client_dni,work_name,date,labor_cost,notes)
+                   VALUES (?,?,?,?,?,?,?,?)''',
+                (client_id, client_name, client_address, client_dni, work_name, date, labor_cost, notes))
     conn.commit()
     qid = cur.lastrowid
     conn.close()
     return qid
 
-def add_quote_item(quote_id, material_id, name, description, image_path, unit_price, quantity):
+def add_quote_item(quote_id, material_id, name, description, image_path, unit_price, quantity, supplier_price=0):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute('''INSERT INTO quote_items (quote_id,material_id,name,description,image_path,unit_price,quantity)
-                   VALUES (?,?,?,?,?,?,?)''',
-                (quote_id, material_id, name, description, image_path, unit_price, quantity))
+    cur.execute('''INSERT INTO quote_items (quote_id,material_id,name,description,image_path,unit_price,supplier_price,quantity)
+                   VALUES (?,?,?,?,?,?,?,?)''',
+                (quote_id, material_id, name, description, image_path, unit_price, supplier_price, quantity))
     conn.commit()
     iid = cur.lastrowid
     conn.close()
@@ -226,13 +281,13 @@ def delete_quote(qid):
     conn.commit()
     conn.close()
 
-def update_quote(qid, client_id, client_name, client_address, client_dni, labor_cost=0, notes=None):
+def update_quote(qid, client_id, client_name, client_address, client_dni, work_name=None, labor_cost=0, notes=None):
     """Update quote header info"""
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute('''UPDATE quotes SET client_id=?,client_name=?,client_address=?,client_dni=?,labor_cost=?,notes=?
+    cur.execute('''UPDATE quotes SET client_id=?,client_name=?,client_address=?,client_dni=?,work_name=?,labor_cost=?,notes=?
                    WHERE id=?''',
-                (client_id, client_name, client_address, client_dni, labor_cost, notes, qid))
+                (client_id, client_name, client_address, client_dni, work_name, labor_cost, notes, qid))
     conn.commit()
     conn.close()
 

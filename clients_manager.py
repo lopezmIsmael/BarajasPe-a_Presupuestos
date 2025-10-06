@@ -59,12 +59,18 @@ class ClientsFrame(ttk.Frame):
         search_term = self.search_var.get().lower()
         clients = db.list_clients()
         
+        row_count = 0
         for client in clients:
             # Aplicar filtro de búsqueda
             if search_term:
-                if (search_term not in client['name'].lower() and
-                    search_term not in (client['dni'] or '').lower()):
+                name = client['name'].lower()
+                address = (client['address'] or '').lower()
+                dni = (client['dni'] or '').lower()
+                if search_term not in name and search_term not in address and search_term not in dni:
                     continue
+            
+            # Alternar colores de filas
+            tag = 'evenrow' if row_count % 2 == 0 else 'oddrow'
             
             # Añadir item al árbol
             self.tree.insert('', 'end', iid=str(client['id']), values=(
@@ -72,7 +78,9 @@ class ClientsFrame(ttk.Frame):
                 client['address'] or '',
                 client['dni'] or '',
                 client['phone'] or ''
-            ))
+            ), tags=(tag,))
+            
+            row_count += 1
     
     def add(self):
         """Abre el editor para añadir un nuevo cliente"""
