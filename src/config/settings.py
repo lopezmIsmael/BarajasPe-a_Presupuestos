@@ -21,7 +21,8 @@ CARD_SHADOW = "0 2px 8px rgba(43, 125, 233, 0.15)"
 CARD_BACKGROUND = "#FFFFFF"
 BACKGROUND_COLOR = "#F5F8FA"
 
-APP_DIR = Path(__file__).parent
+# Rutas ajustadas para la nueva estructura
+APP_DIR = Path(__file__).parent.parent.parent  # Subir a raíz del proyecto
 ASSETS_DIR = APP_DIR / "assets"
 LOGO_PATH = ASSETS_DIR / "logo.png"
 

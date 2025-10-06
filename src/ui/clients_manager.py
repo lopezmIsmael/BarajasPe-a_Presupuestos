@@ -3,9 +3,9 @@ Gestión de clientes - Interface y lógica
 """
 import tkinter as tk
 from tkinter import ttk, messagebox
-import db
-from config import CLIENT_EDITOR_SIZE
-from ui_utils import (
+from src.database import db
+from src.config.settings import CLIENT_EDITOR_SIZE
+from src.ui.ui_utils import (
     center_window, create_styled_button, create_search_frame,
     create_treeview_with_scrollbar, create_button_frame,
     create_form_field, bind_keyboard_shortcuts

@@ -7,6 +7,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.colors import HexColor
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
+from src.pdf.formatter import render_formatted_notes
 import tempfile
 import os
 
@@ -21,7 +22,7 @@ except ImportError:
 BRAND_COLOR = HexColor('#2B7DE9')
 
 def generate_quote_preview(client_name, client_address, client_dni, work_name, 
-                          items_data, labor_cost, notes, date_str):
+                          items_data, labor_cost, notes, date_str, formatted_notes=None):
     """
     Genera una imagen de preview del presupuesto sin guardar archivo
     
@@ -103,23 +104,31 @@ def generate_quote_preview(client_name, client_address, client_dni, work_name,
         
         y -= 6
 
-    # Notas
-    if notes:
+    # Notas (formateadas o simples)
+    if formatted_notes or notes:
         y -= 6
         c.setFont('Helvetica-Bold', 10)
         c.drawString(margin, y, "Notas / Observaciones:")
         y -= 12
-        c.setFont('Helvetica', 9)
         
-        notes_lines = notes.split('\n')
-        for notes_line in notes_lines:
-            if not notes_line.strip():
-                y -= 10
-                continue
-            wrapped = _wrap_text(c, notes_line, width - 2*margin, 'Helvetica', 9)
-            for line in wrapped:
-                c.drawString(margin, y, line)
-                y -= 10
+        # Usar notas formateadas si existen
+        if formatted_notes:
+            y = render_formatted_notes(c, formatted_notes, margin, y, 
+                                      width - 2*margin, default_font_size=9)
+            y -= 6
+        elif notes:
+            # Fallback a notas simples
+            c.setFont('Helvetica', 9)
+            
+            notes_lines = notes.split('\n')
+            for notes_line in notes_lines:
+                if not notes_line.strip():
+                    y -= 10
+                    continue
+                wrapped = _wrap_text(c, notes_line, width - 2*margin, 'Helvetica', 9)
+                for line in wrapped:
+                    c.drawString(margin, y, line)
+                    y -= 10
         
         y -= 6
 

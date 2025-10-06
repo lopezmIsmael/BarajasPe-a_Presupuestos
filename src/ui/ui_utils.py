@@ -3,7 +3,7 @@ Utilidades para la interfaz de usuario
 """
 import tkinter as tk
 from tkinter import ttk
-from config import HAS_TTKBOOTSTRAP, SMALL_BUTTON_STYLE
+from src.config.settings import HAS_TTKBOOTSTRAP, SMALL_BUTTON_STYLE
 
 if HAS_TTKBOOTSTRAP:
     import ttkbootstrap as ttkb

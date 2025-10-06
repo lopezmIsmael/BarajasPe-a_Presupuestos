@@ -3,7 +3,7 @@ Gestor visual y de estilos modernos para la aplicación
 """
 import tkinter as tk
 from tkinter import ttk
-from config import (
+from src.config.settings import (
     BRAND_COLOR_PRIMARY, BRAND_COLOR_SECONDARY, BRAND_COLOR_ACCENT,
     BRAND_COLOR_SUCCESS, BRAND_COLOR_DANGER, BRAND_COLOR_LIGHT,
     BRAND_COLOR_WHITE, BRAND_COLOR_TEXT, BRAND_COLOR_TEXT_LIGHT,

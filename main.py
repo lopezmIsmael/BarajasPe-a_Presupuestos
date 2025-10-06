@@ -1,18 +1,18 @@
 import tkinter as tk
 from tkinter import ttk
-import db
-from config import (
+from src.database import db
+from src.config.settings import (
     COMPANY_NAME, MAIN_WINDOW_SIZE, MAIN_WINDOW_TITLE, 
     HAS_TTKBOOTSTRAP, ICONS
 )
-from modern_ui import (
+from src.ui.main_window import (
     ModernStyleManager, create_modern_header, create_action_card,
     create_modern_statusbar
 )
-from ui_utils import bind_keyboard_shortcuts
-from materials_manager import MaterialsFrame, MaterialEditor
-from clients_manager import ClientsFrame, ClientEditor
-from quotes_manager import QuotesFrame
+from src.ui.ui_utils import bind_keyboard_shortcuts
+from src.ui.materials_manager import MaterialsFrame, MaterialEditor
+from src.ui.clients_manager import ClientsFrame, ClientEditor
+from src.ui.quotes_manager import QuotesFrame
 
 if HAS_TTKBOOTSTRAP:
     import ttkbootstrap as ttkb

@@ -2,7 +2,8 @@ import sqlite3
 from pathlib import Path
 import datetime
 
-DB_PATH = Path(__file__).parent / "data.db"
+# Ruta ajustada para la nueva estructura - apunta a data/
+DB_PATH = Path(__file__).parent.parent.parent / "data" / "data.db"
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -27,6 +28,14 @@ def init_db():
     except sqlite3.OperationalError:
         # La columna no existe, añadirla
         cur.execute("ALTER TABLE materials ADD COLUMN supplier_price REAL DEFAULT 0")
+        conn.commit()
+    
+    # Migración: Añadir columna formatted_notes a quotes si no existe
+    try:
+        cur.execute("SELECT formatted_notes FROM quotes LIMIT 1")
+    except sqlite3.OperationalError:
+        # La columna no existe, añadirla
+        cur.execute("ALTER TABLE quotes ADD COLUMN formatted_notes TEXT")
         conn.commit()
     
     # Migración: Añadir columna supplier_price a quote_items si no existe
@@ -231,13 +240,13 @@ def get_client(cid):
     return row
 
 ### Quotes
-def create_quote(client_id, client_name, client_address, client_dni, work_name=None, labor_cost=0, notes=None):
+def create_quote(client_id, client_name, client_address, client_dni, work_name=None, labor_cost=0, notes=None, formatted_notes=None):
     conn = get_conn()
     cur = conn.cursor()
     date = datetime.date.today().isoformat()
-    cur.execute('''INSERT INTO quotes (client_id,client_name,client_address,client_dni,work_name,date,labor_cost,notes)
-                   VALUES (?,?,?,?,?,?,?,?)''',
-                (client_id, client_name, client_address, client_dni, work_name, date, labor_cost, notes))
+    cur.execute('''INSERT INTO quotes (client_id,client_name,client_address,client_dni,work_name,date,labor_cost,notes,formatted_notes)
+                   VALUES (?,?,?,?,?,?,?,?,?)''',
+                (client_id, client_name, client_address, client_dni, work_name, date, labor_cost, notes, formatted_notes))
     conn.commit()
     qid = cur.lastrowid
     conn.close()
@@ -281,13 +290,13 @@ def delete_quote(qid):
     conn.commit()
     conn.close()
 
-def update_quote(qid, client_id, client_name, client_address, client_dni, work_name=None, labor_cost=0, notes=None):
+def update_quote(qid, client_id, client_name, client_address, client_dni, work_name=None, labor_cost=0, notes=None, formatted_notes=None):
     """Update quote header info"""
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute('''UPDATE quotes SET client_id=?,client_name=?,client_address=?,client_dni=?,work_name=?,labor_cost=?,notes=?
+    cur.execute('''UPDATE quotes SET client_id=?,client_name=?,client_address=?,client_dni=?,work_name=?,labor_cost=?,notes=?,formatted_notes=?
                    WHERE id=?''',
-                (client_id, client_name, client_address, client_dni, work_name, labor_cost, notes, qid))
+                (client_id, client_name, client_address, client_dni, work_name, labor_cost, notes, formatted_notes, qid))
     conn.commit()
     conn.close()
 

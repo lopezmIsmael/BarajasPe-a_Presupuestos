@@ -4,8 +4,9 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from reportlab.lib.colors import HexColor
 from pathlib import Path
-from db import get_quote
+from src.database.db import get_quote
 from PIL import Image
+from src.pdf.formatter import render_formatted_notes
 
 BRAND_COLOR = HexColor('#2B7DE9')
 
@@ -26,14 +27,6 @@ def export_quote_to_pdf(qid, out_path):
     # Comenzar más abajo para no sobreescribir el header del folio pre-impreso
     # Dejamos espacio para el logo y datos de la empresa (aprox 80mm desde arriba)
     y = height - 80*mm
-
-    # Título del documento
-    c.setFont('Helvetica-Bold', 14)
-    c.drawString(margin, y, "PRESUPUESTO")
-    c.setFont('Helvetica', 10)
-    y -= 12
-    c.drawString(margin, y, f"Fecha: {quote['date']}")
-    y -= 18
 
     # Información del cliente
     c.setFont('Helvetica-Bold', 11)
@@ -121,35 +114,43 @@ def export_quote_to_pdf(qid, out_path):
         
         y -= 6
 
-    # Mostrar notas si existen
-    if quote.get('notes'):
+    # Mostrar notas si existen (formateadas o simples)
+    if quote.get('formatted_notes') or quote.get('notes'):
         y -= 6
         c.setFont('Helvetica-Bold', 10)
         c.drawString(margin, y, "Notas / Observaciones:")
         y -= 12
-        c.setFont('Helvetica', 9)
         
-        # Dividir notas en líneas
-        notes_lines = quote['notes'].split('\n')
-        for notes_line in notes_lines:
-            if not notes_line.strip():
-                y -= 10
-                continue
-            # Dividir línea larga en múltiples líneas
-            words = notes_line.split()
-            current_line = ""
-            for word in words:
-                test_line = current_line + word + " "
-                if c.stringWidth(test_line, 'Helvetica', 9) < (width - 2*margin):
-                    current_line = test_line
-                else:
-                    if current_line:
-                        c.drawString(margin, y, current_line.strip())
-                        y -= 10
-                    current_line = word + " "
-            if current_line:
-                c.drawString(margin, y, current_line.strip())
-                y -= 10
+        # Usar notas formateadas si existen
+        if quote.get('formatted_notes'):
+            y = render_formatted_notes(c, quote['formatted_notes'], margin, y, 
+                                      width - 2*margin, default_font_size=9)
+            y -= 6
+        elif quote.get('notes'):
+            # Fallback a notas simples
+            c.setFont('Helvetica', 9)
+            
+            # Dividir notas en líneas
+            notes_lines = quote['notes'].split('\n')
+            for notes_line in notes_lines:
+                if not notes_line.strip():
+                    y -= 10
+                    continue
+                # Dividir línea larga en múltiples líneas
+                words = notes_line.split()
+                current_line = ""
+                for word in words:
+                    test_line = current_line + word + " "
+                    if c.stringWidth(test_line, 'Helvetica', 9) < (width - 2*margin):
+                        current_line = test_line
+                    else:
+                        if current_line:
+                            c.drawString(margin, y, current_line.strip())
+                            y -= 10
+                        current_line = word + " "
+                if current_line:
+                    c.drawString(margin, y, current_line.strip())
+                    y -= 10
         
         y -= 6
 
@@ -190,5 +191,24 @@ def export_quote_to_pdf(qid, out_path):
     c.setFont('Helvetica-Oblique', 10)
     c.drawString(margin, y, "El IVA se incrementará en la factura correspondiente")
 
+    c.showPage()
+    c.save()
+
+
+def export_document_to_pdf(formatted_content, out_path):
+    """
+    Genera PDF directamente desde el contenido formateado del documento editado.
+    """
+    out_path = Path(out_path)
+    c = canvas.Canvas(str(out_path), pagesize=A4)
+    width, height = A4
+    margin = 20*mm
+    
+    # Comenzar más abajo para el folio pre-impreso
+    y = height - 80*mm
+    
+    # Renderizar el contenido formateado
+    y = render_formatted_notes(c, formatted_content, margin, y, width - 2*margin, default_font_size=10)
+    
     c.showPage()
     c.save()

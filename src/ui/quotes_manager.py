@@ -3,17 +3,19 @@ Gestión de presupuestos - Interface y lógica
 """
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
-import db
-from pdf_generator import export_quote_to_pdf
-from pdf_preview import generate_quote_preview
-from config import QUOTE_EDITOR_SIZE, QUOTE_VIEWER_SIZE, PDF_FILETYPES
-from ui_utils import (
+from src.database import db
+from src.pdf.generator import export_quote_to_pdf, export_document_to_pdf
+from src.pdf.preview import generate_quote_preview
+from src.ui.wysiwyg_editor import PDFStyleEditor
+from src.pdf.document_preview import generate_document_preview
+from src.config.settings import QUOTE_EDITOR_SIZE, QUOTE_VIEWER_SIZE, PDF_FILETYPES
+from src.ui.ui_utils import (
     center_window, create_styled_button, create_search_frame,
     create_treeview_with_scrollbar, create_button_frame,
     bind_keyboard_shortcuts
 )
-from materials_manager import MaterialEditor
-from clients_manager import ClientEditor
+from src.ui.materials_manager import MaterialEditor
+from src.ui.clients_manager import ClientEditor
 from PIL import Image, ImageTk
 from datetime import datetime
 
@@ -151,8 +153,18 @@ class QuotesFrame(ttk.Frame):
             return
         
         try:
-            export_quote_to_pdf(quote_id, file_path)
-            messagebox.showinfo('Éxito', f'PDF exportado:\\n{file_path}')
+            # Primero intentar exportar usando el documento formateado si existe
+            quote, items = db.get_quote(quote_id)
+            formatted_notes = quote['formatted_notes'] if quote and 'formatted_notes' in quote.keys() else None
+            
+            if formatted_notes:
+                # Usar el documento editado
+                export_document_to_pdf(formatted_notes, file_path)
+            else:
+                # Fallback: usar el método tradicional
+                export_quote_to_pdf(quote_id, file_path)
+            
+            messagebox.showinfo('Éxito', f'PDF exportado:\n{file_path}')
         except Exception as e:
             messagebox.showerror('Error', f'Error al exportar: {str(e)}')
     
@@ -311,6 +323,7 @@ class QuoteEditor(tk.Toplevel):
         self.items_data = []  # Lista de items del presupuesto
         self.preview_photo = None  # Para evitar garbage collection
         self.preview_update_job = None  # Para debouncing de updates
+        self.document_needs_save = False  # Flag para indicar si el documento ha cambiado
         
         self._setup_window()
         self._setup_ui()
@@ -351,29 +364,34 @@ class QuoteEditor(tk.Toplevel):
         self.grid_columnconfigure(0, weight=1)
         
         main_container.grid_rowconfigure(0, weight=1)
-        main_container.grid_columnconfigure(0, weight=0)  # Panel izquierdo fijo
-        main_container.grid_columnconfigure(1, weight=1)  # Panel centro expandible
-        main_container.grid_columnconfigure(2, weight=0)  # Panel derecho preview fijo
+        main_container.grid_columnconfigure(0, weight=1)  # Panel izquierdo (datos + items)
+        main_container.grid_columnconfigure(1, weight=1)  # Panel derecho (documento + preview)
         
-        # Panel izquierdo - Cliente y configuración (más compacto)
-        self._create_left_panel(main_container)
+        # Panel izquierdo - Datos y items
+        left_container = ttk.Frame(main_container)
+        left_container.grid(row=0, column=0, sticky='nsew', padx=(10, 5), pady=10)
+        left_container.grid_rowconfigure(0, weight=0)  # Datos básicos
+        left_container.grid_rowconfigure(1, weight=1)  # Items
+        left_container.grid_columnconfigure(0, weight=1)
         
-        # Panel centro - Items del presupuesto
-        self._create_center_panel(main_container)
+        # Sub-panel: datos básicos
+        self._create_left_panel(left_container)
         
-        # Panel derecho - Preview del PDF
-        self._create_preview_panel(main_container)
+        # Sub-panel: items del presupuesto
+        self._create_center_panel(left_container)
+        
+        # Panel derecho - Documento editable y preview
+        self._create_document_and_preview_panel(main_container)
         
         # Botones principales en la parte inferior
         self._create_bottom_buttons()
     
     def _create_left_panel(self, parent):
-        """Crea el panel izquierdo con cliente y búsqueda de materiales"""
+        """Crea el panel con datos básicos del presupuesto"""
         left_panel = ttk.Frame(parent, padding=10)
-        left_panel.grid(row=0, column=0, sticky='nsew', padx=(10, 5), pady=10)
+        left_panel.grid(row=0, column=0, sticky='nsew')
         
         # Configurar expansión de filas
-        left_panel.grid_rowconfigure(3, weight=1)  # La sección de notas se expande
         left_panel.grid_rowconfigure(4, weight=1)  # La sección de materiales se expande
         
         # Sección cliente
@@ -385,10 +403,7 @@ class QuoteEditor(tk.Toplevel):
         # Sección mano de obra
         self._create_labor_section(left_panel)
         
-        # Sección notas
-        self._create_notes_section(left_panel)
-        
-        # Sección búsqueda de materiales
+        # Sección búsqueda de materiales (expande para llenar espacio)
         self._create_material_search_section(left_panel)
     
     def _create_client_section(self, parent):
@@ -457,30 +472,8 @@ class QuoteEditor(tk.Toplevel):
         # Actualizar totales cuando cambie
         self.labor_entry.bind('<KeyRelease>', lambda e: self._update_totals())
     
-    def _create_notes_section(self, parent):
-        """Crea la sección de notas"""
-        notes_frame = ttk.LabelFrame(parent, text='Notas / Observaciones', padding=10)
-        notes_frame.grid(row=3, column=0, sticky='nsew', pady=(0, 8))
-        
-        # Configurar para que se expanda
-        notes_frame.grid_rowconfigure(0, weight=1)
-        notes_frame.grid_columnconfigure(0, weight=1)
-        
-        # Text widget para notas con scrollbar (más grande)
-        text_container = ttk.Frame(notes_frame)
-        text_container.grid(row=0, column=0, sticky='nsew')
-        
-        self.notes_text = tk.Text(text_container, height=8, width=35, 
-                                  font=('Helvetica', 10), wrap='word')
-        self.notes_text.pack(side='left', fill='both', expand=True)
-        
-        notes_scrollbar = ttk.Scrollbar(text_container, orient='vertical', 
-                                       command=self.notes_text.yview)
-        self.notes_text.configure(yscrollcommand=notes_scrollbar.set)
-        notes_scrollbar.pack(side='right', fill='y')
-        
-        # Actualizar preview cuando cambien las notas
-        self.notes_text.bind('<KeyRelease>', lambda e: self._schedule_preview_update())
+    # NOTA: La sección de notas fue eliminada - ahora se edita directamente en el documento
+    # def _create_notes_section(self, parent):
     
     def _create_material_search_section(self, parent):
         """Crea la sección de búsqueda y adición de materiales"""
@@ -614,48 +607,39 @@ class QuoteEditor(tk.Toplevel):
                                    font=('Helvetica', 12, 'bold'))
         self.total_label.pack()
     
-    def _create_preview_panel(self, parent):
-        """Crea el panel derecho con la previsualización del PDF"""
-        preview_panel = ttk.Frame(parent, padding=10)
-        preview_panel.grid(row=0, column=2, sticky='nsew', padx=(5, 10), pady=10)
+    def _create_document_and_preview_panel(self, parent):
+        """Crea el panel derecho con editor WYSIWYG estilo PDF"""
+        right_panel = ttk.Frame(parent, padding=10)
+        right_panel.grid(row=0, column=1, sticky='nsew', padx=(5, 10), pady=10)
         
         # Configurar para que se expanda
-        preview_panel.grid_rowconfigure(1, weight=1)
-        preview_panel.grid_columnconfigure(0, weight=1)
+        right_panel.grid_rowconfigure(0, weight=0)  # Título
+        right_panel.grid_rowconfigure(1, weight=1)  # Editor
+        right_panel.grid_columnconfigure(0, weight=1)
         
-        # Título
-        title_label = ttk.Label(preview_panel, text='Vista Previa del PDF', 
+        # Título con botón regenerar
+        title_frame = ttk.Frame(right_panel)
+        title_frame.grid(row=0, column=0, sticky='ew', pady=(0, 10))
+        
+        title_label = ttk.Label(title_frame, text='📄 Documento del Presupuesto (Edición Directa)', 
                  font=('Helvetica', 12, 'bold'))
-        title_label.grid(row=0, column=0, sticky='w', pady=(0, 8))
+        title_label.pack(side='left')
         
-        # Frame con scroll para la imagen del PDF
-        canvas_frame = ttk.Frame(preview_panel)
-        canvas_frame.grid(row=1, column=0, sticky='nsew')
-        canvas_frame.grid_rowconfigure(0, weight=1)
-        canvas_frame.grid_columnconfigure(0, weight=1)
+        # Botón regenerar a la derecha del título
+        regen_btn = create_styled_button(title_frame, '🔄 Regenerar desde Datos',
+                                          self._regenerate_document, 'secondary')
+        regen_btn.pack(side='right')
         
-        # Canvas con scrollbars
-        self.preview_canvas = tk.Canvas(canvas_frame, width=400, height=600, 
-                                       bg='#E0E0E0', highlightthickness=1,
-                                       highlightbackground='#2B7DE9')
-        self.preview_canvas.grid(row=0, column=0, sticky='nsew')
+        # Editor WYSIWYG con apariencia de PDF
+        self.document_editor = PDFStyleEditor(right_panel)
+        self.document_editor.grid(row=1, column=0, sticky='nsew')
         
-        # Scrollbars
-        v_scrollbar = ttk.Scrollbar(canvas_frame, orient='vertical', 
-                                   command=self.preview_canvas.yview)
-        v_scrollbar.grid(row=0, column=1, sticky='ns')
-        
-        h_scrollbar = ttk.Scrollbar(canvas_frame, orient='horizontal',
-                                   command=self.preview_canvas.xview)
-        h_scrollbar.grid(row=1, column=0, sticky='ew')
-        
-        self.preview_canvas.configure(yscrollcommand=v_scrollbar.set,
-                                     xscrollcommand=h_scrollbar.set)
-        
-        # Botón para actualizar manualmente
-        refresh_btn = create_styled_button(preview_panel, '🔄 Actualizar Vista Previa', 
-                                          self._update_preview, 'primary')
-        refresh_btn.grid(row=2, column=0, sticky='ew', pady=(8, 0))
+        # Configurar callback para cambios (ya NO actualiza preview, solo marca como modificado)
+        self.document_editor.set_change_callback(lambda: self._on_document_change())
+    
+    def _create_preview_panel(self, parent):
+        """LEGACY: Mantener por compatibilidad - ahora usa _create_document_and_preview_panel"""
+        pass
     
     def _create_bottom_buttons(self):
         """Crea los botones principales de la ventana"""
@@ -1052,10 +1036,19 @@ class QuoteEditor(tk.Toplevel):
             self.labor_entry.delete(0, tk.END)
             self.labor_entry.insert(0, str(quote['labor_cost']))
         
-        # Cargar notas
-        if quote.get('notes'):
-            self.notes_text.delete('1.0', tk.END)
-            self.notes_text.insert('1.0', quote['notes'])
+        # Cargar contenido del documento editado (formatted_notes almacena el documento completo)
+        try:
+            formatted_notes = quote['formatted_notes'] if 'formatted_notes' in quote.keys() else None
+            
+            if formatted_notes:
+                # Cargar contenido formateado del documento
+                self.document_editor.set_content_json(formatted_notes)
+            else:
+                # Si no existe, generar desde datos
+                self._regenerate_document()
+        except (KeyError, TypeError, AttributeError):
+            # Si hay error, generar desde datos
+            self._regenerate_document()
         
         # Cargar items
         for item in items:
@@ -1079,42 +1072,100 @@ class QuoteEditor(tk.Toplevel):
         self._refresh_items()
     
     def _schedule_preview_update(self):
-        """Programa una actualización de la preview con debounce"""
+        """Programa una actualización cuando cambien los datos (items, cliente, etc)"""
         # Cancelar actualización pendiente
         if self.preview_update_job:
             self.after_cancel(self.preview_update_job)
         
-        # Programar nueva actualización en 500ms
-        self.preview_update_job = self.after(500, self._update_preview)
+        # Programar regeneración del documento en 500ms
+        self.preview_update_job = self.after(500, self._regenerate_document)
     
-    def _update_preview(self):
-        """Actualiza la vista previa del PDF"""
+    def _generate_document_content(self):
+        """Genera el contenido completo del presupuesto en texto"""
+        # Obtener datos actuales
+        client_name = self.client_search_var.get().strip() or "Cliente"
+        client_address = ""
+        client_dni = ""
+        
+        if self.selected_client:
+            client_address = self.selected_client['address'] if 'address' in self.selected_client.keys() else ''
+            client_dni = self.selected_client['dni'] if 'dni' in self.selected_client.keys() else ''
+        
+        work_name = self.work_name_entry.get().strip()
+        
         try:
-            # Obtener datos actuales
-            client_name = self.client_search_var.get().strip() or "Cliente"
-            client_address = ""
-            client_dni = ""
-            
-            if self.selected_client:
-                client_address = self.selected_client.get('address', '')
-                client_dni = self.selected_client.get('dni', '')
-            
-            work_name = self.work_name_entry.get().strip()
-            notes = self.notes_text.get('1.0', tk.END).strip()
-            
-            try:
-                labor_cost = float(self.labor_entry.get())
-            except:
-                labor_cost = 0.0
-            
-            # Fecha actual
-            date_str = datetime.now().strftime('%d de %B de %Y')
+            labor_cost = float(self.labor_entry.get())
+        except:
+            labor_cost = 0.0
+        
+        # Fecha actual
+        date_str = datetime.now().strftime('%d de %B de %Y')
+        
+        # Construir contenido (SIN título "PRESUPUESTO")
+        content = []
+        content.append(f"Fecha: {date_str}")
+        content.append("")
+        content.append(f"CLIENTE: {client_name}")
+        
+        if client_address:
+            content.append(f"DIRECCIÓN: {client_address}")
+        if client_dni:
+            content.append(f"DNI/CIF: {client_dni}")
+        
+        if work_name:
+            content.append(f"OBRA: {work_name}")
+        
+        content.append("")
+        content.append("MATERIALES Y SERVICIOS:")
+        content.append("")
+        
+        # Items
+        total_materials = 0
+        for item in self.items_data:
+            # Usar 'price' que es la clave correcta en items_data
+            unit_price = item.get('price', item.get('unit_price', 0))
+            quantity = item.get('quantity', 0)
+            subtotal = quantity * unit_price
+            total_materials += subtotal
+            content.append(f"• {item['name']}")
+            content.append(f"  Cantidad: {quantity:.2f} - Precio: {unit_price:.2f}€ - Subtotal: {subtotal:.2f}€")
+            if item.get('description'):
+                content.append(f"  {item['description']}")
+            content.append("")
+        
+        content.append(f"TOTAL MATERIALES: {total_materials:.2f}€")
+        
+        if labor_cost > 0:
+            content.append(f"MANO DE OBRA: {labor_cost:.2f}€")
+        
+        content.append("")
+        total_with_labor = total_materials + labor_cost
+        content.append(f"TOTAL PRESUPUESTO: {total_with_labor:.2f} EUROS")
+        content.append("")
+        content.append("ESTE PRESUPUESTO TIENE UNA VALIDEZ DE 15 DÍAS")
+        content.append("El IVA se incrementará en la factura correspondiente")
+        
+        return "\n".join(content)
+    
+    def _regenerate_document(self):
+        """Regenera el documento desde los datos actuales"""
+        content = self._generate_document_content()
+        self.document_editor.set_plain_text(content)
+        self.document_needs_save = True
+    
+    def _on_document_change(self):
+        """Se llama cuando el documento es editado"""
+        self.document_needs_save = True
+        # Ya no hay preview separado, el editor YA MUESTRA el documento visualmente
+    
+    def _update_pdf_preview(self):
+        """Actualiza la vista previa del PDF desde el contenido del editor"""
+        try:
+            # Obtener contenido formateado del editor
+            formatted_content = self.document_editor.get_content_json()
             
             # Generar preview
-            preview_image = generate_quote_preview(
-                client_name, client_address, client_dni, work_name,
-                self.items_data, labor_cost, notes, date_str
-            )
+            preview_image = generate_document_preview(formatted_content)
             
             if preview_image:
                 # Redimensionar imagen para que quepa en el canvas
@@ -1139,9 +1190,17 @@ class QuoteEditor(tk.Toplevel):
                 self.preview_canvas.configure(scrollregion=(0, 0, new_width, new_height))
         
         except Exception as e:
-            print(f"Error actualizando preview: {e}")
+            print(f"Error actualizando preview del PDF: {e}")
             import traceback
             traceback.print_exc()
+    
+    def _update_preview(self):
+        """LEGACY: Ahora solo regenera el documento (el editor WYSIWYG ya muestra visualmente)"""
+        self._regenerate_document()
+    
+    def _update_pdf_preview(self):
+        """LEGACY: Ya no se usa, el editor WYSIWYG muestra el documento con estilos"""
+        pass  # El editor PDFStyleEditor ya muestra el documento visualmente
     
     def _save(self):
         """Valida y guarda el presupuesto"""
@@ -1189,8 +1248,9 @@ class QuoteEditor(tk.Toplevel):
         # Obtener nombre de obra
         work_name = self.work_name_entry.get().strip() or None
         
-        # Obtener notas
-        notes = self.notes_text.get('1.0', tk.END).strip() or None
+        # Obtener contenido del documento editado (texto plano para notes, formateado para formatted_notes)
+        notes = self.document_editor.get_plain_text() or None
+        formatted_notes = self.document_editor.get_content_json() or None
         
         try:
             # Crear o actualizar presupuesto
@@ -1199,7 +1259,7 @@ class QuoteEditor(tk.Toplevel):
                 db.update_quote(
                     self.quote_id, client_id, client_name, 
                     client_address, client_dni, work_name=work_name, 
-                    labor_cost=labor_cost, notes=notes
+                    labor_cost=labor_cost, notes=notes, formatted_notes=formatted_notes
                 )
                 # Eliminar items antiguos y añadir nuevos
                 quote, old_items = db.get_quote(self.quote_id)
@@ -1211,7 +1271,7 @@ class QuoteEditor(tk.Toplevel):
                 quote_id = db.create_quote(
                     client_id, client_name, client_address, 
                     client_dni, work_name=work_name, labor_cost=labor_cost,
-                    notes=notes
+                    notes=notes, formatted_notes=formatted_notes
                 )
             
             # Añadir items y actualizar precios en BD si han cambiado

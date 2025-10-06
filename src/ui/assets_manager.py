@@ -2,7 +2,7 @@
 Gestión de recursos de la aplicación (imágenes, logos, etc.)
 """
 from PIL import Image, ImageTk
-from config import ASSETS_DIR
+from src.config.settings import ASSETS_DIR
 
 class AssetManager:
     """Gestor de recursos de la aplicación"""
