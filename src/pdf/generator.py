@@ -7,6 +7,7 @@ from pathlib import Path
 from src.database.db import get_quote
 from PIL import Image
 from src.pdf.formatter import render_formatted_notes
+from datetime import datetime
 
 BRAND_COLOR = HexColor('#2B7DE9')
 
@@ -28,15 +29,27 @@ def export_quote_to_pdf(qid, out_path):
     # Dejamos espacio para el logo y datos de la empresa (aprox 80mm desde arriba)
     y = height - 80*mm
 
-    # Información del cliente
-    c.setFont('Helvetica-Bold', 11)
-    c.drawString(margin, y, f"CLIENTE: {quote['client_name'] or ''}")
+    # Fecha a la izquierda
+    current_date = datetime.now().strftime('%d/%m/%Y')
     c.setFont('Helvetica', 10)
-    y -= 12
+    c.drawString(margin, y, f"Fecha: {current_date}")
+    
+    # Datos del cliente arriba a la derecha en formato tabla
+    client_x = width - margin - 85*mm  # Posición derecha
+    client_y = y
+    
+    c.setFont('Helvetica-Bold', 10)
+    c.drawString(client_x, client_y, "CLIENTE:")
+    c.setFont('Helvetica', 10)
+    c.drawString(client_x + 20*mm, client_y, quote['client_name'] or '')
+    client_y -= 12
     
     if quote['client_address']:
-        c.drawString(margin, y, f"DIRECCIÓN: {quote['client_address']}")
-        y -= 12
+        c.setFont('Helvetica-Bold', 10)
+        c.drawString(client_x, client_y, "DIRECCIÓN:")
+        c.setFont('Helvetica', 10)
+        c.drawString(client_x + 20*mm, client_y, quote['client_address'])
+        client_y -= 12
     
     location_parts = []
     if quote.get('client_city'):
@@ -45,33 +58,38 @@ def export_quote_to_pdf(qid, out_path):
         location_parts.append(f"CP: {quote['client_postal_code']}")
     
     if location_parts:
-        c.drawString(margin, y, f"LOCALIDAD: {', '.join(location_parts)}")
-        y -= 12
+        c.setFont('Helvetica-Bold', 10)
+        c.drawString(client_x, client_y, "LOCALIDAD:")
+        c.setFont('Helvetica', 10)
+        c.drawString(client_x + 20*mm, client_y, ', '.join(location_parts))
+        client_y -= 12
     
     if quote.get('client_dni'):
-        c.drawString(margin, y, f"DNI: {quote['client_dni']}")
-        y -= 12
-
-    y -= 8
+        c.setFont('Helvetica-Bold', 10)
+        c.drawString(client_x, client_y, "DNI/CIF:")
+        c.setFont('Helvetica', 10)
+        c.drawString(client_x + 20*mm, client_y, quote['client_dni'])
     
+    if quote.get('work_name'):
+        client_y -= 12
+        c.setFont('Helvetica-Bold', 10)
+        c.drawString(client_x, client_y, "OBRA:")
+        c.setFont('Helvetica', 10)
+        c.drawString(client_x + 20*mm, client_y, quote['work_name'])
+    
+    # Ajustar Y para continuar después de la tabla de cliente
+    y -= 60  # Espacio suficiente para la tabla del cliente
+
     # Saludo y descripción
     c.setFont('Helvetica', 10)
     c.drawString(margin, y, "Muy Sr. Nuestro:")
     y -= 12
-    
-    # Descripción de trabajos (si hay nombre de obra)
-    if quote.get('work_name'):
-        c.drawString(margin, y, f"A continuación, detallamos desglose de presupuesto aproximado de trabajos a realizar en")
-        y -= 12
-        c.drawString(margin, y, f"sus instalaciones: {quote['work_name']}")
-        y -= 16
-    else:
-        c.drawString(margin, y, "A continuación, detallamos desglose de presupuesto aproximado de trabajos a realizar en")
-        y -= 12
-        c.drawString(margin, y, "sus instalaciones.")
-        y -= 16
+    c.drawString(margin, y, "A continuación, detallamos desglose de presupuesto aproximado de trabajos a realizar en")
+    y -= 12
+    c.drawString(margin, y, "sus instalaciones.")
+    y -= 16
 
-    # Lista de items (materiales)
+    # Lista de items (materiales) - CON CANTIDAD pero SIN PRECIOS
     total_materials = 0.0
     for idx, item in enumerate(items, 1):
         # Verificar si hay espacio suficiente para el item
@@ -79,14 +97,14 @@ def export_quote_to_pdf(qid, out_path):
             c.showPage()
             y = height - margin
         
+        # Calcular total pero no mostrarlo
         line_total = item['unit_price'] * item['quantity']
         total_materials += line_total
         
-        # Punto numerado
+        # Punto numerado - CON cantidad pero SIN precio
         c.setFont('Helvetica-Bold', 10)
-        bullet_text = f"• {item['name']}"
-        if item['quantity'] > 1:
-            bullet_text += f" x{item['quantity']}"
+        quantity_text = f" (Cantidad: {item['quantity']:.0f})" if item['quantity'] > 1 else ""
+        bullet_text = f"• {item['name']}{quantity_text}"
         c.drawString(margin + 5, y, bullet_text)
         y -= 12
         
@@ -159,37 +177,87 @@ def export_quote_to_pdf(qid, out_path):
         c.showPage()
         y = height - margin
 
-    # Mano de obra
+    # Calcular total incluyendo mano de obra (pero no se muestra desglose)
     labor = quote['labor_cost'] or 0.0
     
-    # Línea de resumen
+    # Línea de resumen - CENTRADA Y EN NEGRITA Y EN MAYÚSCULAS
     y -= 8
     c.setFont('Helvetica-Bold', 11)
-    c.drawString(margin, y, "El total de los trabajos presupuestados incluyendo mano de obra,")
+    text1 = "EL TOTAL DE LOS TRABAJOS PRESUPUESTADOS, INCLUYENDO MANO DE OBRA,"
+    text2 = "MATERIALES, ASCIENDE A LA CANTIDAD DE:"
+    c.drawCentredString(width / 2, y, text1)
     y -= 12
-    c.drawString(margin, y, "materiales y medio de elevación, asciende a la cantidad de:")
+    c.drawCentredString(width / 2, y, text2)
     y -= 16
     
-    # Total
+    # Total - ÚNICO PRECIO MOSTRADO EN NEGRITA Y CENTRADO
     total_with_labor = total_materials + labor
     c.setFont('Helvetica-Bold', 14)
     total_text = f"{total_with_labor:.2f} EUROS"
     c.drawCentredString(width / 2, y, total_text)
-    y -= 20
+    y -= 30
 
-    # Notas adicionales si no hay mano de obra explícita pero hay descripción
-    if labor == 0:
-        c.setFont('Helvetica', 9)
-        c.drawString(margin, y, "* Mano de obra incluida en el precio")
-        y -= 12
-
-    # Textos fijos finales
-    y -= 12
-    c.setFont('Helvetica-Bold', 10)
-    c.drawString(margin, y, "ESTE PRESUPUESTO TIENE UNA VALIDEZ DE 15 DÍAS")
+    # Condiciones adicionales - CENTRADAS Y EN MAYÚSCULAS
+    c.setFont('Helvetica', 9)
+    
+    # Primera condición
+    text = "LOS TRABAJOS NO PRESUPUESTADOS SE COBRARÍAN A 25€ LA HORA O SE PRESUPUESTARÁN EN CASO DE OBRA MAYOR."
+    c.drawCentredString(width / 2, y, text)
     y -= 14
-    c.setFont('Helvetica-Oblique', 10)
-    c.drawString(margin, y, "El IVA se incrementará en la factura correspondiente")
+    
+    # Segunda condición - SUBRAYADA Y EN NEGRITA
+    c.setFont('Helvetica-Bold', 9)
+    text = "ESTE PRESUPUESTO TIENE UNA VALIDEZ DE 15 DÍAS."
+    text_width = c.stringWidth(text, 'Helvetica-Bold', 9)
+    text_x = (width - text_width) / 2
+    c.drawString(text_x, y, text)
+    # Línea de subrayado
+    c.line(text_x, y - 2, text_x + text_width, y - 2)
+    y -= 14
+    
+    # Tercera condición
+    c.setFont('Helvetica', 9)
+    text1 = "NO SE INCLUYEN LOS PERMISOS NI LICENCIAS QUE SEAN NECESARIOS, LOS CUALES SE DEBERÁ CONTAR"
+    text2 = "CON ELLOS AL COMIENZO DE LOS TRABAJOS. NO SE INCLUYEN PROYECTOS O MEMORIAS TÉCNICAS SI FUERAN NECESARIOS."
+    c.drawCentredString(width / 2, y, text1)
+    y -= 10
+    c.drawCentredString(width / 2, y, text2)
+    y -= 14
+    
+    # Nota del IVA - SUBRAYADA Y EN NEGRITA
+    c.setFont('Helvetica-Bold', 9)
+    text = "EL IVA SE INCREMENTARÁ EN LA FACTURA CORRESPONDIENTE"
+    text_width = c.stringWidth(text, 'Helvetica-Bold', 9)
+    text_x = (width - text_width) / 2
+    c.drawString(text_x, y, text)
+    # Línea de subrayado
+    c.line(text_x, y - 2, text_x + text_width, y - 2)
+    y -= 30
+    
+    # Espacio para firmas
+    if y < 80*mm:  # Si no hay espacio, nueva página
+        c.showPage()
+        y = height - margin - 100
+    
+    # Líneas de firma
+    signature_y = y
+    signature_width = 60*mm
+    
+    # Firma del Constructor
+    c.setFont('Helvetica', 10)
+    c.drawString(margin, signature_y, "EL CONSTRUCTOR")
+    c.line(margin, signature_y - 20, margin + signature_width, signature_y - 20)
+    c.setFont('Helvetica', 8)
+    c.drawString(margin, signature_y - 28, "Barajas Peña S.L.")
+    
+    # Firma del Promotor (Cliente)
+    promotor_x = width - margin - signature_width
+    c.setFont('Helvetica', 10)
+    c.drawString(promotor_x, signature_y, "EL PROMOTOR")
+    c.line(promotor_x, signature_y - 20, promotor_x + signature_width, signature_y - 20)
+    c.setFont('Helvetica', 8)
+    client_name = quote.get('client_name', '') or ''
+    c.drawString(promotor_x, signature_y - 28, client_name)
 
     c.showPage()
     c.save()

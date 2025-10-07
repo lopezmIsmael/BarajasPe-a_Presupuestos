@@ -6,6 +6,8 @@ import datetime
 DB_PATH = Path(__file__).parent.parent.parent / "data" / "data.db"
 
 def get_conn():
+    # Crear el directorio data si no existe
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
@@ -14,38 +16,7 @@ def init_db():
     conn = get_conn()
     cur = conn.cursor()
     
-    # Migración: Añadir columna work_name si no existe
-    try:
-        cur.execute("SELECT work_name FROM quotes LIMIT 1")
-    except sqlite3.OperationalError:
-        # La columna no existe, añadirla
-        cur.execute("ALTER TABLE quotes ADD COLUMN work_name TEXT")
-        conn.commit()
-    
-    # Migración: Añadir columna supplier_price a materials si no existe
-    try:
-        cur.execute("SELECT supplier_price FROM materials LIMIT 1")
-    except sqlite3.OperationalError:
-        # La columna no existe, añadirla
-        cur.execute("ALTER TABLE materials ADD COLUMN supplier_price REAL DEFAULT 0")
-        conn.commit()
-    
-    # Migración: Añadir columna formatted_notes a quotes si no existe
-    try:
-        cur.execute("SELECT formatted_notes FROM quotes LIMIT 1")
-    except sqlite3.OperationalError:
-        # La columna no existe, añadirla
-        cur.execute("ALTER TABLE quotes ADD COLUMN formatted_notes TEXT")
-        conn.commit()
-    
-    # Migración: Añadir columna supplier_price a quote_items si no existe
-    try:
-        cur.execute("SELECT supplier_price FROM quote_items LIMIT 1")
-    except sqlite3.OperationalError:
-        # La columna no existe, añadirla
-        cur.execute("ALTER TABLE quote_items ADD COLUMN supplier_price REAL DEFAULT 0")
-        conn.commit()
-    
+    # Primero crear las tablas
     cur.execute('''
     CREATE TABLE IF NOT EXISTS materials (
         id INTEGER PRIMARY KEY,
@@ -103,6 +74,40 @@ def init_db():
     )
     ''')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_quote_items_quote ON quote_items(quote_id)')
+    
+    # Migraciones: Añadir columnas si no existen (para bases de datos existentes)
+    # Migración: Añadir columna work_name si no existe
+    try:
+        cur.execute("SELECT work_name FROM quotes LIMIT 1")
+    except sqlite3.OperationalError:
+        # La columna no existe, añadirla
+        cur.execute("ALTER TABLE quotes ADD COLUMN work_name TEXT")
+        conn.commit()
+    
+    # Migración: Añadir columna supplier_price a materials si no existe
+    try:
+        cur.execute("SELECT supplier_price FROM materials LIMIT 1")
+    except sqlite3.OperationalError:
+        # La columna no existe, añadirla
+        cur.execute("ALTER TABLE materials ADD COLUMN supplier_price REAL DEFAULT 0")
+        conn.commit()
+    
+    # Migración: Añadir columna formatted_notes a quotes si no existe
+    try:
+        cur.execute("SELECT formatted_notes FROM quotes LIMIT 1")
+    except sqlite3.OperationalError:
+        # La columna no existe, añadirla
+        cur.execute("ALTER TABLE quotes ADD COLUMN formatted_notes TEXT")
+        conn.commit()
+    
+    # Migración: Añadir columna supplier_price a quote_items si no existe
+    try:
+        cur.execute("SELECT supplier_price FROM quote_items LIMIT 1")
+    except sqlite3.OperationalError:
+        # La columna no existe, añadirla
+        cur.execute("ALTER TABLE quote_items ADD COLUMN supplier_price REAL DEFAULT 0")
+        conn.commit()
+    
     conn.commit()
     conn.close()
 
