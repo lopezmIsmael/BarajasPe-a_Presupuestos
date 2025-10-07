@@ -1241,21 +1241,13 @@ class QuoteEditor(tk.Toplevel):
         # Obtener nombre de obra
         work_name = self.work_name_entry.get().strip() or None
         
-        # Obtener notas/condiciones personalizadas del editor WYSIWYG
-        # Guardamos solo el texto entre "instalaciones" y "Los trabajos no presupuestados"
+        # Obtener el documento completo del editor WYSIWYG
         notes = None
         formatted_notes = None
         if hasattr(self, 'document_editor'):
-            doc_text = self.document_editor.get_plain_text()
-            # Extraer texto personalizado entre las secciones fijas
-            if "instalaciones" in doc_text and "Los trabajos no presupuestados" in doc_text:
-                parts = doc_text.split("instalaciones", 1)
-                if len(parts) > 1:
-                    parts2 = parts[1].split("Los trabajos no presupuestados", 1)
-                    custom_text = parts2[0].strip()
-                    if custom_text:
-                        formatted_notes = custom_text
-                        notes = custom_text
+            # Guardar el documento completo tal como está en el editor
+            formatted_notes = self.document_editor.get_plain_text()
+            notes = formatted_notes  # notes se usa para búsquedas simples
         
         try:
             # Crear o actualizar presupuesto
