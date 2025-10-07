@@ -52,22 +52,20 @@ class PDFStyleEditor(ttk.Frame):
         ttk.Separator(toolbar_inner, orient='vertical').pack(side='left', fill='y', padx=5)
         
         # Botón Negrita
-        bold_btn = ttk.Button(toolbar_inner, text="B", width=3, 
+        bold_btn = ttk.Button(toolbar_inner, text="N", width=3, 
                              command=lambda: self._toggle_format('bold'))
         bold_btn.pack(side='left', padx=2)
         
         # Botón Subrayado
-        underline_btn = ttk.Button(toolbar_inner, text="U", width=3,
+        underline_btn = ttk.Button(toolbar_inner, text="S", width=3,
                                    command=lambda: self._toggle_format('underline'))
         underline_btn.pack(side='left', padx=2)
         
         # Botón Tachado
-        strike_btn = ttk.Button(toolbar_inner, text="S", width=3,
+        strike_btn = ttk.Button(toolbar_inner, text="T", width=3,
                                command=lambda: self._toggle_format('strikethrough'))
         strike_btn.pack(side='left', padx=2)
         
-        # Separador
-        ttk.Separator(toolbar_inner, orient='vertical').pack(side='left', fill='y', padx=5)
         
         # Botón Viñeta
         bullet_btn = ttk.Button(toolbar_inner, text="•", width=3,

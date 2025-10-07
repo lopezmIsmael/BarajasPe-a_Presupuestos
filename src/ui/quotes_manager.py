@@ -222,6 +222,17 @@ class QuoteViewer(tk.Toplevel):
         
         ttk.Label(header, text=f"Presupuesto #{quote['id']}", 
                  font=('Helvetica', 16, 'bold')).pack(anchor='w')
+        
+        # Mostrar nombre de obra si existe
+        try:
+            work_name = quote['work_name']
+            if work_name:
+                ttk.Label(header, text=f"Obra: {work_name}", 
+                         font=('Helvetica', 12, 'bold'), 
+                         foreground='#2B7DE9').pack(anchor='w', pady=(5, 0))
+        except (KeyError, IndexError):
+            pass
+        
         ttk.Label(header, text=f"Fecha: {quote['date']}").pack(anchor='w')
         ttk.Label(header, text=f"Cliente: {quote['client_name'] or 'N/A'}").pack(anchor='w')
         
@@ -246,21 +257,25 @@ class QuoteViewer(tk.Toplevel):
         tree_container = ttk.Frame(border_canvas)
         tree_container.pack(fill='both', expand=True, padx=2, pady=2)
         
-        # Configurar treeview para items con columnas de ambos precios
-        columns = ('name', 'qty', 'supplier_price', 'price', 'total')
+        # Configurar treeview para items con columnas incluyendo beneficio y margen
+        columns = ('name', 'qty', 'supplier_price', 'price', 'benefit', 'margin', 'total')
         tree = ttk.Treeview(tree_container, columns=columns, show='headings', height=10)
         
         tree.heading('name', text='Material', anchor='w')
         tree.heading('qty', text='Cantidad', anchor='w')
         tree.heading('supplier_price', text='P. Proveedor', anchor='w')
         tree.heading('price', text='P. Venta', anchor='w')
+        tree.heading('benefit', text='Beneficio', anchor='w')
+        tree.heading('margin', text='Margen %', anchor='w')
         tree.heading('total', text='Total', anchor='w')
         
-        tree.column('name', anchor='w')
-        tree.column('qty', anchor='w')
-        tree.column('supplier_price', anchor='w')
-        tree.column('price', anchor='w')
-        tree.column('total', anchor='w')
+        tree.column('name', width=180, anchor='w')
+        tree.column('qty', width=80, anchor='w')
+        tree.column('supplier_price', width=95, anchor='w')
+        tree.column('price', width=80, anchor='w')
+        tree.column('benefit', width=85, anchor='w')
+        tree.column('margin', width=80, anchor='w')
+        tree.column('total', width=85, anchor='w')
         
         # Configurar tags para filas alternadas con mejor contraste
         tree.tag_configure('oddrow', background='#FFFFFF')
@@ -279,11 +294,19 @@ class QuoteViewer(tk.Toplevel):
             except (KeyError, IndexError):
                 supplier_price = 0
             
+            sale_price = item['unit_price']
+            
+            # Calcular beneficio y margen
+            benefit = sale_price - supplier_price
+            margin = ((benefit / sale_price) * 100) if sale_price > 0 else 0
+            
             tree.insert('', 'end', values=(
                 item['name'],
                 item['quantity'],
                 f"{supplier_price:.2f}",
-                f"{item['unit_price']:.2f}",
+                f"{sale_price:.2f}",
+                f"{benefit:.2f}",
+                f"{margin:.1f}%",
                 f"{line_total:.2f}"
             ), tags=(tag,))
     
@@ -297,9 +320,25 @@ class QuoteViewer(tk.Toplevel):
         labor_cost = quote['labor_cost'] or 0
         total = subtotal + labor_cost
         
+        # Calcular beneficio total de materiales
+        total_cost = 0
+        for item in items:
+            try:
+                supplier_price = item['supplier_price'] or 0
+            except (KeyError, IndexError):
+                supplier_price = 0
+            total_cost += supplier_price * item['quantity']
+        
+        total_benefit = subtotal - total_cost
+        overall_margin = ((total_benefit / subtotal) * 100) if subtotal > 0 else 0
+        
         # Mostrar totales
-        ttk.Label(totals_frame, text=f"Subtotal materiales: {subtotal:.2f} €", 
+        ttk.Label(totals_frame, text=f"Coste materiales (proveedor): {total_cost:.2f} €", 
+                 font=('Helvetica', 10), foreground='gray').pack(anchor='e')
+        ttk.Label(totals_frame, text=f"Subtotal materiales (venta): {subtotal:.2f} €", 
                  font=('Helvetica', 11)).pack(anchor='e')
+        ttk.Label(totals_frame, text=f"Beneficio materiales: {total_benefit:.2f} € ({overall_margin:.1f}%)", 
+                 font=('Helvetica', 11), foreground='green').pack(anchor='e', pady=(0, 10))
         ttk.Label(totals_frame, text=f"Mano de obra: {labor_cost:.2f} €", 
                  font=('Helvetica', 11)).pack(anchor='e')
         ttk.Label(totals_frame, text=f"TOTAL: {total:.2f} €", 
@@ -572,21 +611,25 @@ class QuoteEditor(tk.Toplevel):
         tree_container = ttk.Frame(border_canvas)
         tree_container.pack(fill='both', expand=True, padx=1, pady=1)
         
-        # Tabla de items con columnas de ambos precios (height reducido)
-        columns = ('name', 'supplier_price', 'price', 'qty', 'total')
+        # Tabla de items con columnas incluyendo beneficio y margen (height reducido)
+        columns = ('name', 'supplier_price', 'price', 'benefit', 'margin', 'qty', 'total')
         self.items_tree = ttk.Treeview(tree_container, columns=columns, show='headings', height=6)
         
         self.items_tree.heading('name', text='Material', anchor='w')
         self.items_tree.heading('supplier_price', text='P. Proveedor', anchor='w')
         self.items_tree.heading('price', text='P. Venta', anchor='w')
+        self.items_tree.heading('benefit', text='Beneficio', anchor='w')
+        self.items_tree.heading('margin', text='Margen %', anchor='w')
         self.items_tree.heading('qty', text='Cantidad', anchor='w')
         self.items_tree.heading('total', text='Total', anchor='w')
         
-        self.items_tree.column('name', width=150, anchor='w')
-        self.items_tree.column('supplier_price', width=80, anchor='w')
-        self.items_tree.column('price', width=70, anchor='w')
-        self.items_tree.column('qty', width=60, anchor='w')
-        self.items_tree.column('total', width=80, anchor='w')
+        self.items_tree.column('name', width=120, anchor='w')
+        self.items_tree.column('supplier_price', width=75, anchor='w')
+        self.items_tree.column('price', width=65, anchor='w')
+        self.items_tree.column('benefit', width=70, anchor='w')
+        self.items_tree.column('margin', width=65, anchor='w')
+        self.items_tree.column('qty', width=55, anchor='w')
+        self.items_tree.column('total', width=70, anchor='w')
         
         # Configurar tags para filas alternadas con mejor contraste
         self.items_tree.tag_configure('oddrow', background='#FFFFFF')
@@ -901,11 +944,18 @@ class QuoteEditor(tk.Toplevel):
             
             # Obtener precio de proveedor (items_data es dict, sí tiene .get())
             supplier_price = item.get('supplier_price', 0) or 0
+            sale_price = item['price']
+            
+            # Calcular beneficio y margen
+            benefit = sale_price - supplier_price
+            margin = ((benefit / sale_price) * 100) if sale_price > 0 else 0
             
             self.items_tree.insert('', 'end', iid=str(i), values=(
                 item['name'],
                 f"{supplier_price:.2f}",
-                f"{item['price']:.2f}",
+                f"{sale_price:.2f}",
+                f"{benefit:.2f}",
+                f"{margin:.1f}%",
                 item['quantity'],
                 f"{total:.2f}"
             ), tags=(tag,))
@@ -951,17 +1001,34 @@ class QuoteEditor(tk.Toplevel):
         if not row_id:
             return
         
-        # Solo permitir editar columnas de precio de venta y cantidad
-        # #2=supplier_price (no editable aquí), #3=price (editable), #4=qty (editable)
-        if column not in ('#3', '#4'):  
+        # Permitir editar: supplier_price (#2), price (#3), benefit (#4), margin (#5), qty (#6)
+        if column not in ('#2', '#3', '#4', '#5', '#6'):  
             return
         
         idx = int(row_id)
         item = self.items_data[idx]
         
-        # Obtener el valor actual y el bbox de la celda
-        col_name = 'price' if column == '#3' else 'quantity'
-        current_value = item['price'] if column == '#3' else item['quantity']
+        # Obtener valores actuales
+        supplier_price = item.get('supplier_price', 0) or 0
+        sale_price = item['price']
+        quantity = item['quantity']
+        
+        # Determinar qué estamos editando
+        if column == '#2':  # Precio proveedor
+            col_label = 'Precio Proveedor'
+            current_value = supplier_price
+        elif column == '#3':  # Precio venta
+            col_label = 'Precio Venta'
+            current_value = sale_price
+        elif column == '#4':  # Beneficio
+            col_label = 'Beneficio'
+            current_value = sale_price - supplier_price
+        elif column == '#5':  # Margen %
+            col_label = 'Margen %'
+            current_value = ((sale_price - supplier_price) / sale_price * 100) if sale_price > 0 else 0
+        else:  # column == '#6' - Cantidad
+            col_label = 'Cantidad'
+            current_value = quantity
         
         # Obtener posición de la celda
         bbox = self.items_tree.bbox(row_id, column)
@@ -971,8 +1038,7 @@ class QuoteEditor(tk.Toplevel):
         # Crear Entry temporal sobre la celda
         x, y, width, height = bbox
         
-        entry_var = tk.StringVar(value=str(current_value))
-        # Usar tk.Entry en lugar de ttk.Entry para evitar problemas de visualización
+        entry_var = tk.StringVar(value=str(current_value).replace('%', ''))
         entry = tk.Entry(self.items_tree, textvariable=entry_var, 
                         font=('Segoe UI', 10), 
                         relief='solid',
@@ -981,27 +1047,55 @@ class QuoteEditor(tk.Toplevel):
         entry.place(x=x, y=y, width=width, height=height)
         entry.focus_set()
         entry.select_range(0, tk.END)
-        entry.icursor(tk.END)  # Colocar cursor al final
+        entry.icursor(tk.END)
         
         def save_edit(event=None):
             try:
                 new_value = float(entry_var.get())
-                if new_value < 0:
-                    raise ValueError()
                 
-                if column == '#3':  # Precio de venta
+                if column == '#2':  # Precio proveedor
+                    if new_value < 0:
+                        raise ValueError("El precio no puede ser negativo")
+                    self.items_data[idx]['supplier_price'] = new_value
+                    # El precio de venta se mantiene, beneficio y margen se recalculan
+                    
+                elif column == '#3':  # Precio venta
+                    if new_value < 0:
+                        raise ValueError("El precio no puede ser negativo")
                     self.items_data[idx]['price'] = new_value
-                    # Actualizar precio original si no existía
-                    if 'original_price' not in self.items_data[idx]:
-                        self.items_data[idx]['original_price'] = item['price']
-                else:  # Cantidad
-                    if new_value == 0:
-                        raise ValueError()
+                    # El precio proveedor se mantiene, beneficio y margen se recalculan
+                    
+                elif column == '#4':  # Beneficio
+                    if new_value < 0:
+                        raise ValueError("El beneficio no puede ser negativo")
+                    # Beneficio = Precio Venta - Precio Proveedor
+                    # Nuevo Precio Venta = Precio Proveedor + Beneficio
+                    supplier_price = item.get('supplier_price', 0) or 0
+                    new_sale_price = supplier_price + new_value
+                    if new_sale_price < 0:
+                        raise ValueError("El precio de venta resultante no puede ser negativo")
+                    self.items_data[idx]['price'] = new_sale_price
+                    
+                elif column == '#5':  # Margen %
+                    if new_value < 0 or new_value >= 100:
+                        raise ValueError("El margen debe estar entre 0 y 99.9%")
+                    # Margen = ((Precio Venta - Precio Proveedor) / Precio Venta) * 100
+                    # Precio Venta = Precio Proveedor / (1 - Margen/100)
+                    supplier_price = item.get('supplier_price', 0) or 0
+                    margin_decimal = new_value / 100
+                    if margin_decimal >= 1:
+                        raise ValueError("El margen no puede ser 100% o superior")
+                    new_sale_price = supplier_price / (1 - margin_decimal) if margin_decimal < 1 else supplier_price * 2
+                    self.items_data[idx]['price'] = new_sale_price
+                    
+                else:  # column == '#6' - Cantidad
+                    if new_value <= 0:
+                        raise ValueError("La cantidad debe ser mayor que 0")
                     self.items_data[idx]['quantity'] = new_value
                 
                 self._refresh_items()
-            except ValueError:
-                messagebox.showerror('Error', 'Valor inválido')
+            except ValueError as e:
+                messagebox.showerror('Error', str(e) if str(e) else 'Valor inválido')
             finally:
                 entry.destroy()
         
@@ -1016,7 +1110,13 @@ class QuoteEditor(tk.Toplevel):
         """Mensaje informativo para usar doble click"""
         messagebox.showinfo(
             'Editar items',
-            'Para editar precio o cantidad, haz doble click directamente sobre el valor que quieres cambiar.'
+            'Para editar cualquier valor (precio proveedor, precio venta, beneficio, margen, cantidad), '
+            'haz doble click directamente sobre el valor que quieres cambiar.\n\n'
+            'Los campos están sincronizados:\n'
+            '• Si cambias el precio proveedor → se recalculan beneficio y margen\n'
+            '• Si cambias el precio venta → se recalculan beneficio y margen\n'
+            '• Si cambias el beneficio → se recalcula el precio de venta\n'
+            '• Si cambias el margen → se recalcula el precio de venta'
         )
     
     def _remove_item(self):
