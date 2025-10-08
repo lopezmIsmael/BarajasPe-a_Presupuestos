@@ -57,6 +57,10 @@ class QuotesFrame(ttk.Frame):
         # Doble click para exportar PDF
         self.tree.bind('<Double-Button-1>', lambda e: self.export_pdf())
         
+        # Menú contextual (click derecho)
+        self._create_context_menu()
+        self.tree.bind('<Button-3>', self._show_context_menu)
+        
         # Botones de acción
         buttons_config = [
             ('✏️ Editar', self.edit_quote, 'info'),
@@ -109,6 +113,54 @@ class QuotesFrame(ttk.Frame):
             ), tags=(tag,))
             
             row_count += 1
+    
+    def _create_context_menu(self):
+        """Crea el menú contextual"""
+        self.context_menu = tk.Menu(self, tearoff=0)
+        self.context_menu.add_command(label="✏️ Editar Presupuesto", command=self.edit_quote)
+        self.context_menu.add_command(label="📄 Exportar PDF", command=self.export_pdf)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="📋 Crear Parte de Obra", command=self.create_work_report)
+        self.context_menu.add_command(label="📋 Ver Partes de Obra", command=self.view_work_reports)
+    
+    def _show_context_menu(self, event):
+        """Muestra el menú contextual"""
+        # Seleccionar el item bajo el cursor
+        item = self.tree.identify_row(event.y)
+        if item:
+            self.tree.selection_set(item)
+            self.context_menu.post(event.x_root, event.y_root)
+    
+    def create_work_report(self):
+        """Crea un parte de obra desde el presupuesto seleccionado"""
+        selection = self.tree.selection()
+        if not selection:
+            messagebox.showwarning('Advertencia', 'Selecciona un presupuesto')
+            return
+        
+        quote_id = int(selection[0])
+        
+        # Importar aquí para evitar dependencia circular
+        from src.ui.work_reports_manager import WorkReportEditor
+        
+        WorkReportEditor(self, report_id=None, quote_id=quote_id, on_save=None)
+    
+    def view_work_reports(self):
+        """Muestra los partes de obra del presupuesto seleccionado"""
+        selection = self.tree.selection()
+        if not selection:
+            messagebox.showwarning('Advertencia', 'Selecciona un presupuesto')
+            return
+        
+        quote_id = int(selection[0])
+        reports = db.list_work_reports(quote_id)
+        
+        if not reports:
+            messagebox.showinfo('Info', 'Este presupuesto no tiene partes de obra asociados')
+            return
+        
+        # Mostrar ventana con lista de partes
+        WorkReportsListDialog(self, quote_id, reports)
     
     def new_quote(self):
         """Abre el editor para crear un nuevo presupuesto"""
@@ -1479,3 +1531,64 @@ class QuoteEditor(tk.Toplevel):
             
         except Exception as e:
             messagebox.showerror('Error', f'Error al guardar: {str(e)}')
+
+
+class WorkReportsListDialog(tk.Toplevel):
+    """Diálogo para mostrar partes de obra de un presupuesto"""
+    
+    def __init__(self, parent, quote_id, reports):
+        super().__init__(parent)
+        self.quote_id = quote_id
+        self.reports = reports
+        
+        self.title('Partes de Obra del Presupuesto')
+        self.geometry('600x400')
+        center_window(self, 600, 400)
+        
+        self._setup_ui()
+        
+        # Modal
+        self.transient(parent)
+        self.grab_set()
+    
+    def _setup_ui(self):
+        """Configura la interfaz"""
+        main_frame = ttk.Frame(self, padding=10)
+        main_frame.pack(fill='both', expand=True)
+        
+        ttk.Label(main_frame, text='Partes de Obra Asociados', 
+                 font=('Helvetica', 12, 'bold')).pack(pady=(0, 10))
+        
+        # Tabla de partes
+        columns = ('id', 'work_name', 'date')
+        tree = ttk.Treeview(main_frame, columns=columns, show='headings', height=12)
+        
+        tree.heading('id', text='ID', anchor='w')
+        tree.heading('work_name', text='Nombre', anchor='w')
+        tree.heading('date', text='Fecha', anchor='w')
+        
+        tree.column('id', width=50, anchor='w')
+        tree.column('work_name', width=300, anchor='w')
+        tree.column('date', width=150, anchor='w')
+        
+        scrollbar = ttk.Scrollbar(main_frame, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        
+        tree.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+        
+        # Cargar partes
+        for report in self.reports:
+            tree.insert('', 'end', values=(
+                report['id'],
+                report['work_name'],
+                report['date_created']
+            ))
+        
+        # Botones
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill='x', pady=(10, 0))
+        
+        create_styled_button(
+            btn_frame, 'Cerrar', self.destroy, 'secondary'
+        ).pack(side='right', padx=5)

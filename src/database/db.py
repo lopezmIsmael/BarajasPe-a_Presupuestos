@@ -108,6 +108,56 @@ def init_db():
         cur.execute("ALTER TABLE quote_items ADD COLUMN supplier_price REAL DEFAULT 0")
         conn.commit()
     
+    # Tablas para partes de obra
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS workers (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        phone TEXT,
+        role TEXT NOT NULL
+    )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_workers_name ON workers(name)')
+    
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS work_reports (
+        id INTEGER PRIMARY KEY,
+        quote_id INTEGER,
+        work_name TEXT NOT NULL,
+        client_name TEXT,
+        date_created TEXT,
+        notes TEXT,
+        FOREIGN KEY(quote_id) REFERENCES quotes(id)
+    )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_work_reports_quote ON work_reports(quote_id)')
+    
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS work_report_hours (
+        id INTEGER PRIMARY KEY,
+        report_id INTEGER NOT NULL,
+        worker_id INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        hours REAL NOT NULL,
+        FOREIGN KEY(report_id) REFERENCES work_reports(id),
+        FOREIGN KEY(worker_id) REFERENCES workers(id)
+    )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_work_hours_report ON work_report_hours(report_id)')
+    
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS work_report_materials (
+        id INTEGER PRIMARY KEY,
+        report_id INTEGER NOT NULL,
+        material_id INTEGER,
+        name TEXT NOT NULL,
+        quantity REAL NOT NULL,
+        FOREIGN KEY(report_id) REFERENCES work_reports(id),
+        FOREIGN KEY(material_id) REFERENCES materials(id)
+    )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_work_materials_report ON work_report_materials(report_id)')
+    
     conn.commit()
     conn.close()
 
@@ -335,5 +385,190 @@ def update_quote_item(item_id, quantity, unit_price):
     cur = conn.cursor()
     cur.execute('UPDATE quote_items SET quantity=?, unit_price=? WHERE id=?',
                 (quantity, unit_price, item_id))
+    conn.commit()
+    conn.close()
+
+
+### Workers CRUD
+def add_worker(name, phone, role):
+    """Añade un trabajador"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('INSERT INTO workers (name, phone, role) VALUES (?, ?, ?)',
+                (name, phone, role))
+    conn.commit()
+    wid = cur.lastrowid
+    conn.close()
+    return wid
+
+def list_workers():
+    """Lista todos los trabajadores"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('SELECT * FROM workers ORDER BY name')
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def get_worker(worker_id):
+    """Obtiene un trabajador por ID"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('SELECT * FROM workers WHERE id=?', (worker_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+def update_worker(worker_id, name, phone, role):
+    """Actualiza un trabajador"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('UPDATE workers SET name=?, phone=?, role=? WHERE id=?',
+                (name, phone, role, worker_id))
+    conn.commit()
+    conn.close()
+
+def delete_worker(worker_id):
+    """Elimina un trabajador"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('DELETE FROM workers WHERE id=?', (worker_id,))
+    conn.commit()
+    conn.close()
+
+
+### Work Reports CRUD
+def add_work_report(quote_id, work_name, client_name, notes=''):
+    """Crea un parte de obra"""
+    conn = get_conn()
+    cur = conn.cursor()
+    date_created = datetime.datetime.now().strftime('%Y-%m-%d')
+    cur.execute('''INSERT INTO work_reports (quote_id, work_name, client_name, date_created, notes)
+                   VALUES (?, ?, ?, ?, ?)''',
+                (quote_id, work_name, client_name, date_created, notes))
+    conn.commit()
+    rid = cur.lastrowid
+    conn.close()
+    return rid
+
+def list_work_reports(quote_id=None):
+    """Lista partes de obra, opcionalmente filtrados por presupuesto"""
+    conn = get_conn()
+    cur = conn.cursor()
+    if quote_id:
+        cur.execute('SELECT * FROM work_reports WHERE quote_id=? ORDER BY date_created DESC', (quote_id,))
+    else:
+        cur.execute('SELECT * FROM work_reports ORDER BY date_created DESC')
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def get_work_report(report_id):
+    """Obtiene un parte de obra por ID"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('SELECT * FROM work_reports WHERE id=?', (report_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+def update_work_report(report_id, work_name, client_name, notes):
+    """Actualiza un parte de obra"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('UPDATE work_reports SET work_name=?, client_name=?, notes=? WHERE id=?',
+                (work_name, client_name, notes, report_id))
+    conn.commit()
+    conn.close()
+
+def delete_work_report(report_id):
+    """Elimina un parte de obra y sus datos relacionados"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('DELETE FROM work_report_hours WHERE report_id=?', (report_id,))
+    cur.execute('DELETE FROM work_report_materials WHERE report_id=?', (report_id,))
+    cur.execute('DELETE FROM work_reports WHERE id=?', (report_id,))
+    conn.commit()
+    conn.close()
+
+
+### Work Report Hours CRUD
+def add_work_hour(report_id, worker_id, date, hours):
+    """Añade horas de trabajo"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('''INSERT INTO work_report_hours (report_id, worker_id, date, hours)
+                   VALUES (?, ?, ?, ?)''',
+                (report_id, worker_id, date, hours))
+    conn.commit()
+    hid = cur.lastrowid
+    conn.close()
+    return hid
+
+def list_work_hours(report_id):
+    """Lista horas de un parte de obra"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('''SELECT h.*, w.name, w.role 
+                   FROM work_report_hours h
+                   JOIN workers w ON h.worker_id = w.id
+                   WHERE h.report_id=?
+                   ORDER BY h.date, w.role DESC, w.name''', (report_id,))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def update_work_hour(hour_id, hours):
+    """Actualiza horas de trabajo"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('UPDATE work_report_hours SET hours=? WHERE id=?', (hours, hour_id))
+    conn.commit()
+    conn.close()
+
+def delete_work_hour(hour_id):
+    """Elimina horas de trabajo"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('DELETE FROM work_report_hours WHERE id=?', (hour_id,))
+    conn.commit()
+    conn.close()
+
+
+### Work Report Materials CRUD
+def add_work_material(report_id, material_id, name, quantity):
+    """Añade material a un parte de obra"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('''INSERT INTO work_report_materials (report_id, material_id, name, quantity)
+                   VALUES (?, ?, ?, ?)''',
+                (report_id, material_id, name, quantity))
+    conn.commit()
+    mid = cur.lastrowid
+    conn.close()
+    return mid
+
+def list_work_materials(report_id):
+    """Lista materiales de un parte de obra"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('SELECT * FROM work_report_materials WHERE report_id=? ORDER BY name', (report_id,))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def update_work_material(material_id, quantity):
+    """Actualiza cantidad de material"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('UPDATE work_report_materials SET quantity=? WHERE id=?', (quantity, material_id))
+    conn.commit()
+    conn.close()
+
+def delete_work_material(material_id):
+    """Elimina material de un parte de obra"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('DELETE FROM work_report_materials WHERE id=?', (material_id,))
     conn.commit()
     conn.close()

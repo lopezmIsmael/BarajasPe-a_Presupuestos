@@ -13,6 +13,8 @@ from src.ui.ui_utils import bind_keyboard_shortcuts
 from src.ui.materials_manager import MaterialsFrame, MaterialEditor
 from src.ui.clients_manager import ClientsFrame, ClientEditor
 from src.ui.quotes_manager import QuotesFrame
+from src.ui.workers_manager import WorkersFrame
+from src.ui.work_reports_manager import WorkReportsFrame
 
 if HAS_TTKBOOTSTRAP:
     import ttkbootstrap as ttkb
@@ -136,6 +138,15 @@ class ModernApp:
         
         create_action_card(
             cards_frame, 
+            "Nuevo Parte de Obra", 
+            "📋", 
+            "Crear parte",
+            self.quick_new_work_report, 
+            'info'
+        )
+        
+        create_action_card(
+            cards_frame, 
             "Nuevo Material", 
             ICONS['material'], 
             "Añadir producto",
@@ -163,11 +174,17 @@ class ModernApp:
         self.quotes_frame = QuotesFrame(self.notebook, self)
         self.notebook.add(self.quotes_frame, text=f'{ICONS["quote"]} Presupuestos')
         
+        self.work_reports_frame = WorkReportsFrame(self.notebook, self)
+        self.notebook.add(self.work_reports_frame, text='📋 Partes de Obra')
+        
         self.materials_frame = MaterialsFrame(self.notebook, self)
         self.notebook.add(self.materials_frame, text=f'{ICONS["material"]} Materiales')
         
         self.clients_frame = ClientsFrame(self.notebook, self)
         self.notebook.add(self.clients_frame, text=f'{ICONS["client"]} Clientes')
+        
+        self.workers_frame = WorkersFrame(self.notebook, self)
+        self.notebook.add(self.workers_frame, text='👷 Trabajadores')
     
     def _create_modern_status_bar(self):
         """Crea la barra de estado moderna"""
@@ -192,6 +209,11 @@ class ModernApp:
         self.notebook.select(0)
         self.quotes_frame.new_quote()
     
+    def quick_new_work_report(self):
+        """Abre el editor para crear un nuevo parte de obra"""
+        from src.ui.work_reports_manager import WorkReportEditor
+        WorkReportEditor(self.root, report_id=None, quote_id=None, on_save=self.work_reports_frame.refresh)
+    
     def quick_new_material(self):
         """Abre el editor para crear un nuevo material"""
         MaterialEditor(self.root, material_id=None, on_save=self.materials_frame.refresh)
@@ -199,6 +221,11 @@ class ModernApp:
     def quick_new_client(self):
         """Abre el editor para crear un nuevo cliente"""
         ClientEditor(self.root, client_id=None, on_save=self.clients_frame.refresh)
+    
+    def quick_new_worker(self):
+        """Abre el editor para crear un nuevo trabajador"""
+        from src.ui.workers_manager import WorkerEditor
+        WorkerEditor(self.root, worker_id=None, on_save=self.workers_frame.refresh)
     
     def refresh_all(self):
         """Actualiza todas las pestañas y la barra de estado"""
