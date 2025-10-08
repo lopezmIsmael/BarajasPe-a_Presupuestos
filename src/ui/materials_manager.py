@@ -2,13 +2,13 @@
 Gestión de materiales - Interface y lógica
 """
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 from src.database import db
 from src.config.settings import MATERIAL_EDITOR_SIZE
 from src.ui.ui_utils import (
     center_window, create_styled_button, create_search_frame, 
     create_treeview_with_scrollbar, create_button_frame, 
-    create_form_field, bind_keyboard_shortcuts
+    create_form_field, bind_keyboard_shortcuts, show_info, show_error, show_warning, ask_yes_no
 )
 
 
@@ -109,7 +109,7 @@ class MaterialsFrame(ttk.Frame):
             return
         
         material_id = int(selected[0])
-        if messagebox.askyesno('Confirmar', '¿Borrar este material?'):
+        if ask_yes_no('Confirmar', '¿Borrar este material?', self):
             db.delete_material(material_id)
             self.refresh()
 
@@ -394,7 +394,7 @@ class MaterialEditor(tk.Toplevel):
         # Validar nombre
         name = self.name_entry.get().strip()
         if not name:
-            messagebox.showerror('Error', 'El nombre es obligatorio')
+            show_error('Error', 'El nombre es obligatorio', self)
             self.name_entry.focus()
             return
         
@@ -407,7 +407,7 @@ class MaterialEditor(tk.Toplevel):
             if supplier_price < 0:
                 raise ValueError()
         except ValueError:
-            messagebox.showerror('Error', 'Precio de proveedor inválido (debe ser ≥ 0)')
+            show_error('Error', 'Precio de proveedor inválido (debe ser ≥ 0)', self)
             self.supplier_price_entry.focus()
             return
         
@@ -417,7 +417,7 @@ class MaterialEditor(tk.Toplevel):
             if price < 0:
                 raise ValueError()
         except ValueError:
-            messagebox.showerror('Error', 'Precio de venta inválido (debe ser ≥ 0)')
+            show_error('Error', 'Precio de venta inválido (debe ser ≥ 0)', self)
             self.price_entry.focus()
             return
         
@@ -441,4 +441,4 @@ class MaterialEditor(tk.Toplevel):
             self.destroy()
             
         except Exception as e:
-            messagebox.showerror('Error', f'Error al guardar: {str(e)}')
+            show_error('Error', f'Error al guardar: {str(e)}', self)

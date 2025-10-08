@@ -2,13 +2,13 @@
 Gestión de clientes - Interface y lógica
 """
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 from src.database import db
 from src.config.settings import CLIENT_EDITOR_SIZE
 from src.ui.ui_utils import (
     center_window, create_styled_button, create_search_frame,
     create_treeview_with_scrollbar, create_button_frame,
-    create_form_field, bind_keyboard_shortcuts
+    create_form_field, bind_keyboard_shortcuts, show_info, show_error, show_warning, ask_yes_no
 )
 
 
@@ -102,7 +102,7 @@ class ClientsFrame(ttk.Frame):
             return
         
         client_id = int(selected[0])
-        if messagebox.askyesno('Confirmar', '¿Borrar este cliente?'):
+        if ask_yes_no('Confirmar', '¿Borrar este cliente?', self):
             db.delete_client(client_id)
             self.refresh()
 
@@ -213,7 +213,7 @@ class ClientEditor(tk.Toplevel):
         # Validar nombre
         name = self.entries['name'].get().strip()
         if not name:
-            messagebox.showerror('Error', 'El nombre es obligatorio')
+            show_error('Error', 'El nombre es obligatorio', self)
             self.entries['name'].focus()
             return
         
@@ -239,4 +239,4 @@ class ClientEditor(tk.Toplevel):
             self.destroy()
             
         except Exception as e:
-            messagebox.showerror('Error', f'Error al guardar: {str(e)}')
+            show_error('Error', f'Error al guardar: {str(e)}', self)

@@ -2,11 +2,12 @@
 Gestión de partes de obra
 """
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, simpledialog
 from src.database import db
 from src.ui.ui_utils import (
     center_window, create_styled_button, create_search_frame,
-    create_treeview_with_scrollbar
+    create_treeview_with_scrollbar, show_info, show_error,
+    show_warning, ask_yes_no
 )
 from datetime import datetime
 
@@ -103,7 +104,7 @@ class WorkReportsFrame(ttk.Frame):
         """Edita el parte seleccionado"""
         selection = self.tree.selection()
         if not selection:
-            messagebox.showwarning('Advertencia', 'Selecciona un parte')
+            show_warning('Advertencia', 'Selecciona un parte', self)
             return
         
         report_id = int(selection[0])
@@ -113,27 +114,27 @@ class WorkReportsFrame(ttk.Frame):
         """Elimina el parte seleccionado"""
         selection = self.tree.selection()
         if not selection:
-            messagebox.showwarning('Advertencia', 'Selecciona un parte')
+            show_warning('Advertencia', 'Selecciona un parte', self)
             return
         
         report_id = int(selection[0])
         report = db.get_work_report(report_id)
         
-        if messagebox.askyesno('Confirmar', f'¿Eliminar parte "{report["work_name"]}"?'):
+        if ask_yes_no('Confirmar', f'¿Eliminar parte "{report["work_name"]}"?', self):
             db.delete_work_report(report_id)
             self.refresh()
-            messagebox.showinfo('Éxito', 'Parte eliminado')
+            show_info('Éxito', 'Parte eliminado', self)
     
     def export_pdf(self):
         """Exporta el parte a PDF"""
         selection = self.tree.selection()
         if not selection:
-            messagebox.showwarning('Advertencia', 'Selecciona un parte')
+            show_warning('Advertencia', 'Selecciona un parte', self)
             return
         
         report_id = int(selection[0])
         # TODO: Implementar exportación PDF
-        messagebox.showinfo('Info', 'Exportación PDF pendiente de implementar')
+        show_info('Info', 'Exportación PDF pendiente de implementar', self)
 
 
 class WorkReportEditor(tk.Toplevel):
@@ -451,12 +452,12 @@ class WorkReportEditor(tk.Toplevel):
                     self.dates.append(date_str)
                     self._render_hours_table()
             except ValueError:
-                messagebox.showerror('Error', 'Formato de fecha inválido. Use DD/MM/YYYY')
+                show_error('Error', 'Formato de fecha inválido. Use DD/MM/YYYY', self)
     
     def _add_worker_row(self):
         """Añade un trabajador (abre el gestor de trabajadores)"""
-        messagebox.showinfo('Info', 'Use la sección de Trabajadores para añadir nuevos trabajadores.\n'
-                          'Los trabajadores ya existentes aparecen automáticamente aquí.')
+        show_info('Info', 'Use la sección de Trabajadores para añadir nuevos trabajadores.\n'
+                          'Los trabajadores ya existentes aparecen automáticamente aquí.', self)
     
     def _update_hours(self, worker_id, date, value):
         """Actualiza las horas de un trabajador en una fecha"""
@@ -473,7 +474,7 @@ class WorkReportEditor(tk.Toplevel):
         """Quita un material"""
         selection = self.materials_tree.selection()
         if not selection:
-            messagebox.showwarning('Advertencia', 'Selecciona un material')
+            show_warning('Advertencia', 'Selecciona un material', self)
             return
         
         idx = int(selection[0])
@@ -548,7 +549,7 @@ class WorkReportEditor(tk.Toplevel):
         """Guarda el parte"""
         work_name = self.work_name_entry.get().strip()
         if not work_name:
-            messagebox.showerror('Error', 'El nombre de obra es obligatorio')
+            show_error('Error', 'El nombre de obra es obligatorio', self)
             return
         
         client_name = self.client_entry.get().strip()
@@ -580,7 +581,7 @@ class WorkReportEditor(tk.Toplevel):
             for mat in self.materials_data:
                 db.add_work_material(report_id, mat['material_id'], mat['name'], mat['quantity'])
             
-            messagebox.showinfo('Éxito', 'Parte guardado correctamente')
+            show_info('Éxito', 'Parte guardado correctamente', self)
             
             if self.on_save:
                 self.on_save()
@@ -588,4 +589,4 @@ class WorkReportEditor(tk.Toplevel):
             self.destroy()
         
         except Exception as e:
-            messagebox.showerror('Error', f'Error al guardar: {e}')
+            show_error('Error', f'Error al guardar: {e}', self)

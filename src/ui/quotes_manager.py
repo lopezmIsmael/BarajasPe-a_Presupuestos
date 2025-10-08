@@ -2,7 +2,7 @@
 Gestión de presupuestos - Interface y lógica
 """
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog
+from tkinter import ttk, filedialog, simpledialog
 from src.database import db
 from src.pdf.generator import export_quote_to_pdf, export_document_to_pdf
 from src.pdf.preview import generate_quote_preview
@@ -12,7 +12,7 @@ from src.config.settings import QUOTE_EDITOR_SIZE, QUOTE_VIEWER_SIZE, PDF_FILETY
 from src.ui.ui_utils import (
     center_window, create_styled_button, create_search_frame,
     create_treeview_with_scrollbar, create_button_frame,
-    bind_keyboard_shortcuts
+    bind_keyboard_shortcuts, show_info, show_error, show_warning, ask_yes_no
 )
 from src.ui.materials_manager import MaterialEditor
 from src.ui.clients_manager import ClientEditor
@@ -135,7 +135,7 @@ class QuotesFrame(ttk.Frame):
         """Crea un parte de obra desde el presupuesto seleccionado"""
         selection = self.tree.selection()
         if not selection:
-            messagebox.showwarning('Advertencia', 'Selecciona un presupuesto')
+            show_warning('Advertencia', 'Selecciona un presupuesto', self)
             return
         
         quote_id = int(selection[0])
@@ -149,14 +149,14 @@ class QuotesFrame(ttk.Frame):
         """Muestra los partes de obra del presupuesto seleccionado"""
         selection = self.tree.selection()
         if not selection:
-            messagebox.showwarning('Advertencia', 'Selecciona un presupuesto')
+            show_warning('Advertencia', 'Selecciona un presupuesto', self)
             return
         
         quote_id = int(selection[0])
         reports = db.list_work_reports(quote_id)
         
         if not reports:
-            messagebox.showinfo('Info', 'Este presupuesto no tiene partes de obra asociados')
+            show_info('Info', 'Este presupuesto no tiene partes de obra asociados', self)
             return
         
         # Mostrar ventana con lista de partes
@@ -170,7 +170,7 @@ class QuotesFrame(ttk.Frame):
         """Abre el editor para editar el presupuesto seleccionado"""
         selected = self.tree.selection()
         if not selected:
-            messagebox.showwarning('Atención', 'Selecciona un presupuesto para editar')
+            show_warning('Atención', 'Selecciona un presupuesto para editar', self)
             return
         
         quote_id = int(selected[0])
@@ -180,25 +180,25 @@ class QuotesFrame(ttk.Frame):
         """Elimina el presupuesto seleccionado"""
         selected = self.tree.selection()
         if not selected:
-            messagebox.showwarning('Atención', 'Selecciona un presupuesto para eliminar')
+            show_warning('Atención', 'Selecciona un presupuesto para eliminar', self)
             return
         
         quote_id = int(selected[0])
         confirm_msg = f'¿Eliminar el presupuesto #{quote_id}?\\n\\nEsta acción no se puede deshacer.'
         
-        if messagebox.askyesno('Confirmar', confirm_msg):
+        if ask_yes_no('Confirmar', confirm_msg, self):
             try:
                 db.delete_quote(quote_id)
                 self.refresh()
-                messagebox.showinfo('Éxito', 'Presupuesto eliminado correctamente')
+                show_info('Éxito', 'Presupuesto eliminado correctamente', self)
             except Exception as e:
-                messagebox.showerror('Error', f'Error al eliminar: {str(e)}')
+                show_error('Error', f'Error al eliminar: {str(e)}', self)
     
     def export_pdf(self):
         """Exporta el presupuesto seleccionado a PDF"""
         selected = self.tree.selection()
         if not selected:
-            messagebox.showwarning('Atención', 'Selecciona un presupuesto')
+            show_warning('Atención', 'Selecciona un presupuesto', self)
             return
         
         quote_id = int(selected[0])
@@ -218,15 +218,15 @@ class QuotesFrame(ttk.Frame):
             # (datos a la derecha, negritas, subrayado, centrado, etc.)
             export_quote_to_pdf(quote_id, file_path)
             
-            messagebox.showinfo('Éxito', f'PDF exportado:\n{file_path}')
+            show_info('Éxito', f'PDF exportado:\n{file_path}', self)
         except Exception as e:
-            messagebox.showerror('Error', f'Error al exportar: {str(e)}')
+            show_error('Error', f'Error al exportar: {str(e)}', self)
     
     def view_details(self):
-        """Muestra los detalles del presupuesto seleccionado"""
+        """Muestra los detalles del presdupuesto seleccionado"""
         selected = self.tree.selection()
         if not selected:
-            messagebox.showwarning('Atención', 'Selecciona un presupuesto')
+            show_warning('Atención', 'Selecciona un presupuesto', self)
             return
         
         quote_id = int(selected[0])
@@ -1208,7 +1208,7 @@ class QuoteEditor(tk.Toplevel):
                 if material_updated:
                     self._reload_materials_list()
             except ValueError as e:
-                messagebox.showerror('Error', str(e) if str(e) else 'Valor inválido')
+                show_error('Error', str(e) if str(e) else 'Valor inválido', self)
             finally:
                 entry.destroy()
         
@@ -1221,7 +1221,7 @@ class QuoteEditor(tk.Toplevel):
     
     def _edit_item(self):
         """Mensaje informativo para usar doble click"""
-        messagebox.showinfo(
+        show_info(
             'Editar items',
             'Para editar cualquier valor (precio proveedor, precio venta, beneficio, margen, cantidad), '
             'haz doble click directamente sobre el valor que quieres cambiar.\n\n'
@@ -1229,7 +1229,8 @@ class QuoteEditor(tk.Toplevel):
             '• Si cambias el precio proveedor → se recalculan beneficio y margen\n'
             '• Si cambias el precio venta → se recalculan beneficio y margen\n'
             '• Si cambias el beneficio → se recalcula el precio de venta\n'
-            '• Si cambias el margen → se recalcula el precio de venta'
+            '• Si cambias el margen → se recalcula el precio de venta',
+            self
         )
     
     def _remove_item(self):
@@ -1253,7 +1254,7 @@ class QuoteEditor(tk.Toplevel):
         
         quote, items = db.get_quote(self.quote_id)
         if not quote:
-            messagebox.showerror('Error', 'Presupuesto no encontrado')
+            show_error('Error', 'Presupuesto no encontrado', self)
             self.destroy()
             return
         
@@ -1413,13 +1414,13 @@ class QuoteEditor(tk.Toplevel):
         # Validar cliente
         client_name = self.client_search_var.get().strip()
         if not client_name:
-            messagebox.showerror('Error', 'Selecciona un cliente')
+            show_error('Error', 'Selecciona un cliente', self)
             self.client_entry.focus()
             return
         
         # Validar items
         if not self.items_data:
-            messagebox.showerror('Error', 'Añade al menos un item')
+            show_error('Error', 'Añade al menos un item', self)
             return
         
         # Usar el cliente seleccionado si existe, sino buscar por nombre
@@ -1447,7 +1448,7 @@ class QuoteEditor(tk.Toplevel):
             if labor_cost < 0:
                 raise ValueError()
         except ValueError:
-            messagebox.showerror('Error', 'Mano de obra inválida')
+            show_error('Error', 'Mano de obra inválida', self)
             self.labor_entry.focus()
             return
         
@@ -1527,10 +1528,13 @@ class QuoteEditor(tk.Toplevel):
             self.destroy()
             
             # Mostrar mensaje después de cerrar (se muestra en la ventana padre)
-            messagebox.showinfo('Éxito', f'Presupuesto #{quote_id} {action}')
+            # Necesitamos mantener una referencia al parent antes de destruir
+            parent = self.master
+            # Esperar a que se cierre la ventana
+            parent.after(100, lambda: show_info('Éxito', f'Presupuesto #{quote_id} {action}', parent))
             
         except Exception as e:
-            messagebox.showerror('Error', f'Error al guardar: {str(e)}')
+            show_error('Error', f'Error al guardar: {str(e)}', self)
 
 
 class WorkReportsListDialog(tk.Toplevel):

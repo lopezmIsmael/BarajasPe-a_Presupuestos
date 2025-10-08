@@ -2,11 +2,12 @@
 Gestión de trabajadores
 """
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 from src.database import db
 from src.ui.ui_utils import (
     center_window, create_styled_button, create_search_frame,
-    create_treeview_with_scrollbar
+    create_treeview_with_scrollbar, show_info, show_error, 
+    show_warning, ask_yes_no
 )
 
 
@@ -95,7 +96,7 @@ class WorkersFrame(ttk.Frame):
         """Edita el trabajador seleccionado"""
         selection = self.tree.selection()
         if not selection:
-            messagebox.showwarning('Advertencia', 'Selecciona un trabajador')
+            show_warning('Advertencia', 'Selecciona un trabajador', self)
             return
         
         worker_id = int(selection[0])
@@ -105,16 +106,16 @@ class WorkersFrame(ttk.Frame):
         """Elimina el trabajador seleccionado"""
         selection = self.tree.selection()
         if not selection:
-            messagebox.showwarning('Advertencia', 'Selecciona un trabajador')
+            show_warning('Advertencia', 'Selecciona un trabajador', self)
             return
         
         worker_id = int(selection[0])
         worker = db.get_worker(worker_id)
         
-        if messagebox.askyesno('Confirmar', f'¿Eliminar trabajador "{worker["name"]}"?'):
+        if ask_yes_no('Confirmar', f'¿Eliminar trabajador "{worker["name"]}"?', self):
             db.delete_worker(worker_id)
             self.refresh()
-            messagebox.showinfo('Éxito', 'Trabajador eliminado')
+            show_info('Éxito', 'Trabajador eliminado', self)
 
 
 class WorkerEditor(tk.Toplevel):
@@ -195,7 +196,7 @@ class WorkerEditor(tk.Toplevel):
         """Guarda el trabajador"""
         name = self.name_entry.get().strip()
         if not name:
-            messagebox.showerror('Error', 'El nombre es obligatorio')
+            show_error('Error', 'El nombre es obligatorio', self)
             return
         
         phone = self.phone_entry.get().strip()
@@ -204,14 +205,14 @@ class WorkerEditor(tk.Toplevel):
         try:
             if self.worker_id:
                 db.update_worker(self.worker_id, name, phone, role)
-                messagebox.showinfo('Éxito', 'Trabajador actualizado')
+                show_info('Éxito', 'Trabajador actualizado', self)
             else:
                 db.add_worker(name, phone, role)
-                messagebox.showinfo('Éxito', 'Trabajador creado')
+                show_info('Éxito', 'Trabajador creado', self)
             
             if self.on_save:
                 self.on_save()
             
             self.destroy()
         except Exception as e:
-            messagebox.showerror('Error', f'Error al guardar: {e}')
+            show_error('Error', f'Error al guardar: {e}', self)

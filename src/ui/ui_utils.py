@@ -235,3 +235,55 @@ def create_status_bar(parent, initial_text="Listo"):
     status_label.pack(side='left', padx=20, pady=5)
     
     return status_frame, status_label
+
+
+def show_info(title, message, parent=None):
+    """Muestra un diálogo de información siempre al frente"""
+    from tkinter import messagebox
+    if parent:
+        parent.lift()
+        parent.attributes('-topmost', True)
+        result = messagebox.showinfo(title, message, parent=parent)
+        parent.attributes('-topmost', False)
+    else:
+        result = messagebox.showinfo(title, message)
+    return result
+
+
+def show_error(title, message, parent=None):
+    """Muestra un diálogo de error siempre al frente"""
+    from tkinter import messagebox
+    if parent:
+        parent.lift()
+        parent.attributes('-topmost', True)
+        result = messagebox.showerror(title, message, parent=parent)
+        parent.attributes('-topmost', False)
+    else:
+        result = messagebox.showerror(title, message)
+    return result
+
+
+def show_warning(title, message, parent=None):
+    """Muestra un diálogo de advertencia siempre al frente"""
+    from tkinter import messagebox
+    if parent:
+        parent.lift()
+        parent.attributes('-topmost', True)
+        result = messagebox.showwarning(title, message, parent=parent)
+        parent.attributes('-topmost', False)
+    else:
+        result = messagebox.showwarning(title, message)
+    return result
+
+
+def ask_yes_no(title, message, parent=None):
+    """Muestra un diálogo de confirmación siempre al frente"""
+    from tkinter import messagebox
+    if parent:
+        parent.lift()
+        parent.attributes('-topmost', True)
+        result = messagebox.askyesno(title, message, parent=parent)
+        parent.attributes('-topmost', False)
+    else:
+        result = messagebox.askyesno(title, message)
+    return result
