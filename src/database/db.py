@@ -143,6 +143,22 @@ def delete_material(mid):
     conn.commit()
     conn.close()
 
+def update_material_price(mid, price):
+    """Actualiza solo el precio de venta de un material"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('UPDATE materials SET price=? WHERE id=?', (price, mid))
+    conn.commit()
+    conn.close()
+
+def update_material_supplier_price(mid, supplier_price):
+    """Actualiza solo el precio de proveedor de un material"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('UPDATE materials SET supplier_price=? WHERE id=?', (supplier_price, mid))
+    conn.commit()
+    conn.close()
+
 def list_materials():
     conn = get_conn()
     cur = conn.cursor()

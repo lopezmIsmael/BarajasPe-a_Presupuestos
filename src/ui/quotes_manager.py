@@ -20,6 +20,15 @@ from PIL import Image, ImageTk
 from datetime import datetime
 
 
+def format_price_es(value):
+    """
+    Formatea un precio en formato español:
+    - Punto como separador de miles
+    - Coma como separador decimal
+    """
+    return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 class QuotesFrame(ttk.Frame):
     """Frame principal para la gestión de presupuestos"""
     
@@ -96,7 +105,7 @@ class QuotesFrame(ttk.Frame):
                 work_name or 'Sin nombre',
                 quote['client_name'] or '',
                 quote['date'],
-                f"{total:.2f}"
+                format_price_es(total)
             ), tags=(tag,))
             
             row_count += 1
@@ -264,18 +273,18 @@ class QuoteViewer(tk.Toplevel):
         tree.heading('name', text='Material', anchor='w')
         tree.heading('qty', text='Cantidad', anchor='w')
         tree.heading('supplier_price', text='P. Proveedor', anchor='w')
-        tree.heading('price', text='P. Venta', anchor='w')
+        tree.heading('price', text='PVP', anchor='w')
         tree.heading('benefit', text='Beneficio', anchor='w')
         tree.heading('margin', text='Margen %', anchor='w')
         tree.heading('total', text='Total', anchor='w')
         
         tree.column('name', width=180, anchor='w')
-        tree.column('qty', width=80, anchor='w')
-        tree.column('supplier_price', width=95, anchor='w')
-        tree.column('price', width=80, anchor='w')
-        tree.column('benefit', width=85, anchor='w')
-        tree.column('margin', width=80, anchor='w')
-        tree.column('total', width=85, anchor='w')
+        tree.column('qty', width=80, anchor='center')
+        tree.column('supplier_price', width=100, anchor='e')
+        tree.column('price', width=90, anchor='e')
+        tree.column('benefit', width=90, anchor='e')
+        tree.column('margin', width=85, anchor='center')
+        tree.column('total', width=100, anchor='e')
         
         # Configurar tags para filas alternadas con mejor contraste
         tree.tag_configure('oddrow', background='#FFFFFF')
@@ -303,11 +312,11 @@ class QuoteViewer(tk.Toplevel):
             tree.insert('', 'end', values=(
                 item['name'],
                 item['quantity'],
-                f"{supplier_price:.2f}",
-                f"{sale_price:.2f}",
-                f"{benefit:.2f}",
+                format_price_es(supplier_price),
+                format_price_es(sale_price),
+                format_price_es(benefit),
                 f"{margin:.1f}%",
-                f"{line_total:.2f}"
+                format_price_es(line_total)
             ), tags=(tag,))
     
     def _create_totals_section(self, quote, items):
@@ -333,15 +342,15 @@ class QuoteViewer(tk.Toplevel):
         overall_margin = ((total_benefit / subtotal) * 100) if subtotal > 0 else 0
         
         # Mostrar totales
-        ttk.Label(totals_frame, text=f"Coste materiales (proveedor): {total_cost:.2f} €", 
+        ttk.Label(totals_frame, text=f"Coste materiales (proveedor): {format_price_es(total_cost)} €", 
                  font=('Helvetica', 10), foreground='gray').pack(anchor='e')
-        ttk.Label(totals_frame, text=f"Subtotal materiales (venta): {subtotal:.2f} €", 
+        ttk.Label(totals_frame, text=f"Subtotal materiales (venta): {format_price_es(subtotal)} €", 
                  font=('Helvetica', 11)).pack(anchor='e')
-        ttk.Label(totals_frame, text=f"Beneficio materiales: {total_benefit:.2f} € ({overall_margin:.1f}%)", 
+        ttk.Label(totals_frame, text=f"Beneficio materiales: {format_price_es(total_benefit)} € ({overall_margin:.1f}%)", 
                  font=('Helvetica', 11), foreground='green').pack(anchor='e', pady=(0, 10))
-        ttk.Label(totals_frame, text=f"Mano de obra: {labor_cost:.2f} €", 
+        ttk.Label(totals_frame, text=f"Mano de obra: {format_price_es(labor_cost)} €", 
                  font=('Helvetica', 11)).pack(anchor='e')
-        ttk.Label(totals_frame, text=f"TOTAL: {total:.2f} €", 
+        ttk.Label(totals_frame, text=f"TOTAL: {format_price_es(total)} €", 
                  font=('Helvetica', 14, 'bold')).pack(anchor='e')
 
 
@@ -456,11 +465,20 @@ class QuoteEditor(tk.Toplevel):
         
         # Sección búsqueda de materiales (expande para llenar espacio)
         self._create_material_search_section(left_panel)
+        
+        # Sección nombre de obra
+        self._create_work_name_section(left_panel)
+        
+        # Sección mano de obra
+        self._create_labor_section(left_panel)
+        
+        # Sección búsqueda de materiales (expande para llenar espacio)
+        self._create_material_search_section(left_panel)
     
     def _create_client_section(self, parent):
         """Crea la sección de selección de cliente con búsqueda"""
-        client_frame = ttk.LabelFrame(parent, text='Cliente', padding=10)
-        client_frame.grid(row=0, column=0, sticky='ew', pady=(0, 8))
+        client_frame = ttk.LabelFrame(parent, text='👤 Cliente', padding=12)
+        client_frame.grid(row=0, column=0, sticky='ew', pady=(0, 10))
         
         # Cargar lista de clientes
         self.clients_list = db.list_clients()
@@ -472,17 +490,29 @@ class QuoteEditor(tk.Toplevel):
         self.client_search_var.trace('w', lambda *args: self._filter_clients())
         
         search_container = ttk.Frame(client_frame)
-        search_container.pack(fill='x', pady=(0, 5))
+        search_container.pack(fill='x', pady=(0, 8))
+        
+        # Búsqueda con icono
+        search_label = ttk.Label(search_container, text='🔍', font=('Helvetica', 11))
+        search_label.pack(side='left', padx=(0, 5))
         
         self.client_entry = ttk.Entry(search_container, textvariable=self.client_search_var, 
                                       font=('Helvetica', 10))
-        self.client_entry.pack(fill='x')
+        self.client_entry.pack(side='left', fill='x', expand=True, padx=(0, 5))
         
-        # Lista de resultados de clientes (más compacta)
+        # Botón para añadir nuevo cliente
+        new_client_btn = create_styled_button(
+            search_container, '+ Nuevo', self._quick_add_client, 'success'
+        )
+        new_client_btn.pack(side='left')
+        
+        # Lista de resultados de clientes (compacta y elegante)
         list_frame = ttk.Frame(client_frame)
-        list_frame.pack(fill='both', expand=False, pady=(0, 5))
+        list_frame.pack(fill='both', expand=False)
         
-        self.client_listbox = tk.Listbox(list_frame, height=3, font=('Helvetica', 9))
+        self.client_listbox = tk.Listbox(list_frame, height=3, font=('Helvetica', 9),
+                                         relief='solid', borderwidth=1,
+                                         selectmode='single', activestyle='none')
         self.client_listbox.pack(side='left', fill='both', expand=True)
         
         client_scrollbar = ttk.Scrollbar(list_frame, orient='vertical', 
@@ -496,17 +526,11 @@ class QuoteEditor(tk.Toplevel):
         
         # Mostrar todos los clientes inicialmente
         self._show_all_clients()
-        
-        # Botón para añadir nuevo cliente (más compacto)
-        new_client_btn = create_styled_button(
-            client_frame, '+ Nuevo', self._quick_add_client, 'success'
-        )
-        new_client_btn.pack(fill='x')
     
     def _create_work_name_section(self, parent):
         """Crea la sección de nombre de obra"""
-        work_frame = ttk.LabelFrame(parent, text='Nombre de Obra', padding=10)
-        work_frame.grid(row=1, column=0, sticky='ew', pady=(0, 8))
+        work_frame = ttk.LabelFrame(parent, text='🏗️ Nombre de Obra', padding=12)
+        work_frame.grid(row=1, column=0, sticky='ew', pady=(0, 10))
         
         self.work_name_entry = ttk.Entry(work_frame, font=('Helvetica', 10))
         self.work_name_entry.pack(fill='x')
@@ -514,12 +538,20 @@ class QuoteEditor(tk.Toplevel):
     
     def _create_labor_section(self, parent):
         """Crea la sección de mano de obra"""
-        labor_frame = ttk.LabelFrame(parent, text='Mano de obra (€)', padding=10)
-        labor_frame.grid(row=2, column=0, sticky='ew', pady=(0, 8))
+        labor_frame = ttk.LabelFrame(parent, text='💰 Mano de obra', padding=12)
+        labor_frame.grid(row=2, column=0, sticky='ew', pady=(0, 10))
         
-        self.labor_entry = ttk.Entry(labor_frame, font=('Helvetica', 10))
+        # Frame horizontal para label y entry
+        labor_container = ttk.Frame(labor_frame)
+        labor_container.pack(fill='x')
+        
+        ttk.Label(labor_container, text='Coste:', font=('Helvetica', 10)).pack(side='left', padx=(0, 5))
+        
+        self.labor_entry = ttk.Entry(labor_container, font=('Helvetica', 10), width=15)
         self.labor_entry.insert(0, '0')
-        self.labor_entry.pack(fill='x')
+        self.labor_entry.pack(side='left', padx=(0, 5))
+        
+        ttk.Label(labor_container, text='€', font=('Helvetica', 10, 'bold')).pack(side='left')
         
         # Actualizar totales y documento cuando cambie
         def on_labor_change(e):
@@ -529,19 +561,24 @@ class QuoteEditor(tk.Toplevel):
     
     def _create_material_search_section(self, parent):
         """Crea la sección de búsqueda y adición de materiales"""
-        mat_frame = ttk.LabelFrame(parent, text='Buscar y añadir material', padding=10)
+        mat_frame = ttk.LabelFrame(parent, text='📦 Buscar y añadir material', padding=12)
         mat_frame.grid(row=4, column=0, sticky='nsew', pady=(0, 0))
         
         # Configurar para que se expanda verticalmente
         parent.grid_rowconfigure(4, weight=1)
         
-        # Campo de búsqueda
+        # Campo de búsqueda con icono
+        search_container = ttk.Frame(mat_frame)
+        search_container.pack(fill='x', pady=(0, 8))
+        
+        ttk.Label(search_container, text='🔍', font=('Helvetica', 12)).pack(side='left', padx=(0, 5))
+        
         self.mat_search_var = tk.StringVar()
         self.mat_search_var.trace('w', lambda *args: self._filter_materials())
         
-        search_entry = ttk.Entry(mat_frame, textvariable=self.mat_search_var, 
+        search_entry = ttk.Entry(search_container, textvariable=self.mat_search_var, 
                                 font=('Helvetica', 10))
-        search_entry.pack(fill='x', pady=(0, 5))
+        search_entry.pack(side='left', fill='x', expand=True)
         
         # Lista de resultados (más compacta)
         self._create_material_results_list(mat_frame)
@@ -552,14 +589,14 @@ class QuoteEditor(tk.Toplevel):
     def _create_material_results_list(self, parent):
         """Crea la lista de resultados de materiales"""
         results_frame = ttk.Frame(parent)
-        results_frame.pack(fill='both', expand=True, pady=(0, 5))
+        results_frame.pack(fill='both', expand=True, pady=(0, 8))
         
         scrollbar = ttk.Scrollbar(results_frame)
         scrollbar.pack(side='right', fill='y')
         
         self.mat_listbox = tk.Listbox(
             results_frame, height=8, yscrollcommand=scrollbar.set,
-            font=('Helvetica', 9)
+            font=('Helvetica', 9), relief='solid', borderwidth=1
         )
         self.mat_listbox.pack(fill='both', expand=True)
         scrollbar.config(command=self.mat_listbox.yview)
@@ -596,10 +633,10 @@ class QuoteEditor(tk.Toplevel):
         center_panel.grid_rowconfigure(1, weight=1)
         center_panel.grid_columnconfigure(0, weight=1)
         
-        # Título
-        title_label = ttk.Label(center_panel, text='Items del presupuesto', 
+        # Título con icono
+        title_label = ttk.Label(center_panel, text='📋 Items del presupuesto', 
                  font=('Helvetica', 12, 'bold'))
-        title_label.grid(row=0, column=0, sticky='w', pady=(0, 8))
+        title_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
         
         # Frame con borde visible para la tabla
         border_canvas = tk.Canvas(center_panel, highlightthickness=2,
@@ -615,21 +652,21 @@ class QuoteEditor(tk.Toplevel):
         columns = ('name', 'supplier_price', 'price', 'benefit', 'margin', 'qty', 'total')
         self.items_tree = ttk.Treeview(tree_container, columns=columns, show='headings', height=6)
         
-        self.items_tree.heading('name', text='Material', anchor='w')
-        self.items_tree.heading('supplier_price', text='P. Proveedor', anchor='w')
-        self.items_tree.heading('price', text='P. Venta', anchor='w')
-        self.items_tree.heading('benefit', text='Beneficio', anchor='w')
-        self.items_tree.heading('margin', text='Margen %', anchor='w')
-        self.items_tree.heading('qty', text='Cantidad', anchor='w')
-        self.items_tree.heading('total', text='Total', anchor='w')
+        self.items_tree.heading('name', text='📦 Material', anchor='w')
+        self.items_tree.heading('supplier_price', text='💶 P. Proveedor', anchor='w')
+        self.items_tree.heading('price', text='💰 PVP', anchor='w')
+        self.items_tree.heading('benefit', text='📈 Beneficio', anchor='w')
+        self.items_tree.heading('margin', text='📊 Margen %', anchor='w')
+        self.items_tree.heading('qty', text='🔢 Cantidad', anchor='w')
+        self.items_tree.heading('total', text='💵 Total', anchor='w')
         
-        self.items_tree.column('name', width=120, anchor='w')
-        self.items_tree.column('supplier_price', width=75, anchor='w')
-        self.items_tree.column('price', width=65, anchor='w')
-        self.items_tree.column('benefit', width=70, anchor='w')
-        self.items_tree.column('margin', width=65, anchor='w')
-        self.items_tree.column('qty', width=55, anchor='w')
-        self.items_tree.column('total', width=70, anchor='w')
+        self.items_tree.column('name', width=140, anchor='w')
+        self.items_tree.column('supplier_price', width=90, anchor='e')
+        self.items_tree.column('price', width=80, anchor='e')
+        self.items_tree.column('benefit', width=80, anchor='e')
+        self.items_tree.column('margin', width=75, anchor='center')
+        self.items_tree.column('qty', width=70, anchor='center')
+        self.items_tree.column('total', width=100, anchor='e')
         
         # Configurar tags para filas alternadas con mejor contraste
         self.items_tree.tag_configure('oddrow', background='#FFFFFF')
@@ -655,12 +692,13 @@ class QuoteEditor(tk.Toplevel):
         remove_btn = create_styled_button(item_btns, '🗑️ Quitar', self._remove_item, 'danger')
         remove_btn.pack(side='left')
         
-        # Resumen de totales (más compacto)
-        totals_frame = ttk.LabelFrame(center_panel, text='Resumen', padding=8)
+        # Resumen de totales (más compacto y visible)
+        totals_frame = ttk.LabelFrame(center_panel, text='💵 Resumen', padding=10)
         totals_frame.grid(row=3, column=0, sticky='ew')
         
         self.total_label = ttk.Label(totals_frame, text='Total: 0.00 €', 
-                                   font=('Helvetica', 12, 'bold'))
+                                   font=('Helvetica', 13, 'bold'),
+                                   foreground='#2B7DE9')
         self.total_label.pack()
     
     def _create_document_and_preview_panel(self, parent):
@@ -669,26 +707,12 @@ class QuoteEditor(tk.Toplevel):
         right_panel.grid(row=0, column=1, sticky='nsew', padx=(5, 10), pady=10)
         
         # Configurar para que se expanda
-        right_panel.grid_rowconfigure(0, weight=0)  # Título
-        right_panel.grid_rowconfigure(1, weight=1)  # Editor
+        right_panel.grid_rowconfigure(0, weight=1)  # Editor ocupa todo el espacio
         right_panel.grid_columnconfigure(0, weight=1)
         
-        # Título
-        title_frame = ttk.Frame(right_panel)
-        title_frame.grid(row=0, column=0, sticky='ew', pady=(0, 10))
-        
-        title_label = ttk.Label(title_frame, text='📄 Vista del Documento (Editable)', 
-                 font=('Helvetica', 12, 'bold'))
-        title_label.pack(side='left')
-        
-        # Botón actualizar documento
-        refresh_btn = create_styled_button(title_frame, '🔄 Regenerar',
-                                          self._regenerate_document, 'secondary')
-        refresh_btn.pack(side='right')
-        
-        # Editor WYSIWYG para el documento completo
-        self.document_editor = PDFStyleEditor(right_panel)
-        self.document_editor.grid(row=1, column=0, sticky='nsew')
+        # Editor WYSIWYG para el documento completo (incluye su propia toolbar con botón regenerar)
+        self.document_editor = PDFStyleEditor(right_panel, regenerate_callback=self._regenerate_document)
+        self.document_editor.grid(row=0, column=0, sticky='nsew')
         
         # Configurar callback para marcar como modificado
         self.document_editor.on_change_callback = self._on_document_change
@@ -815,6 +839,10 @@ class QuoteEditor(tk.Toplevel):
         self.materials_list = db.list_materials()
         self._filter_materials()
     
+    def _reload_materials_list(self):
+        """Alias para recargar la lista de materiales (usado al actualizar precios)"""
+        self._reload_materials()
+    
     def _filter_materials(self):
         """Filtra los materiales según el término de búsqueda"""
         query = self.mat_search_var.get().strip().lower()
@@ -843,7 +871,7 @@ class QuoteEditor(tk.Toplevel):
             self.filtered_materials.append(None)  # Separador de categoría
             
             for material in sorted(materials_by_cat[category], key=lambda x: x['name']):
-                display = f"  {material['name']} - {material['price']:.2f}€"
+                display = f"  {material['name']} - {format_price_es(material['price'])}€"
                 self.mat_listbox.insert(tk.END, display)
                 self.filtered_materials.append(material)
     
@@ -865,7 +893,7 @@ class QuoteEditor(tk.Toplevel):
                     supplier_price = material['supplier_price'] or 0
                 except (KeyError, IndexError):
                     supplier_price = 0
-                display = f"{material['name']} [{category}] - Prov: {supplier_price:.2f}€ | Venta: {material['price']:.2f}€"
+                display = f"{material['name']} [{category}] - Prov: {format_price_es(supplier_price)}€ | Venta: {format_price_es(material['price'])}€"
                 self.mat_listbox.insert(tk.END, display)
                 self.filtered_materials.append(material)
         else:
@@ -952,12 +980,12 @@ class QuoteEditor(tk.Toplevel):
             
             self.items_tree.insert('', 'end', iid=str(i), values=(
                 item['name'],
-                f"{supplier_price:.2f}",
-                f"{sale_price:.2f}",
-                f"{benefit:.2f}",
+                format_price_es(supplier_price),
+                format_price_es(sale_price),
+                format_price_es(benefit),
                 f"{margin:.1f}%",
                 item['quantity'],
-                f"{total:.2f}"
+                format_price_es(total)
             ), tags=(tag,))
         
         self._update_totals()
@@ -977,7 +1005,7 @@ class QuoteEditor(tk.Toplevel):
         total = subtotal + labor_cost
         
         self.total_label.config(
-            text=f'Subtotal: {subtotal:.2f} € | Mano de obra: {labor_cost:.2f} € | TOTAL: {total:.2f} €'
+            text=f'Subtotal: {format_price_es(subtotal)} € | Mano de obra: {format_price_es(labor_cost)} € | TOTAL: {format_price_es(total)} €'
         )
     
     def _schedule_document_update(self):
@@ -1052,18 +1080,33 @@ class QuoteEditor(tk.Toplevel):
         def save_edit(event=None):
             try:
                 new_value = float(entry_var.get())
+                material_updated = False  # Flag para saber si debemos recargar la lista de materiales
                 
                 if column == '#2':  # Precio proveedor
                     if new_value < 0:
                         raise ValueError("El precio no puede ser negativo")
+                    old_supplier_price = self.items_data[idx]['supplier_price']
                     self.items_data[idx]['supplier_price'] = new_value
                     # El precio de venta se mantiene, beneficio y margen se recalculan
+                    
+                    # Actualizar en la base de datos si cambió
+                    if old_supplier_price != new_value and 'material_id' in self.items_data[idx]:
+                        material_id = self.items_data[idx]['material_id']
+                        db.update_material_supplier_price(material_id, new_value)
+                        material_updated = True
                     
                 elif column == '#3':  # Precio venta
                     if new_value < 0:
                         raise ValueError("El precio no puede ser negativo")
+                    old_price = self.items_data[idx]['price']
                     self.items_data[idx]['price'] = new_value
                     # El precio proveedor se mantiene, beneficio y margen se recalculan
+                    
+                    # Actualizar en la base de datos si cambió
+                    if old_price != new_value and 'material_id' in self.items_data[idx]:
+                        material_id = self.items_data[idx]['material_id']
+                        db.update_material_price(material_id, new_value)
+                        material_updated = True
                     
                 elif column == '#4':  # Beneficio
                     if new_value < 0:
@@ -1074,7 +1117,14 @@ class QuoteEditor(tk.Toplevel):
                     new_sale_price = supplier_price + new_value
                     if new_sale_price < 0:
                         raise ValueError("El precio de venta resultante no puede ser negativo")
+                    old_price = self.items_data[idx]['price']
                     self.items_data[idx]['price'] = new_sale_price
+                    
+                    # Actualizar precio de venta en la base de datos
+                    if old_price != new_sale_price and 'material_id' in self.items_data[idx]:
+                        material_id = self.items_data[idx]['material_id']
+                        db.update_material_price(material_id, new_sale_price)
+                        material_updated = True
                     
                 elif column == '#5':  # Margen %
                     if new_value < 0 or new_value >= 100:
@@ -1086,7 +1136,14 @@ class QuoteEditor(tk.Toplevel):
                     if margin_decimal >= 1:
                         raise ValueError("El margen no puede ser 100% o superior")
                     new_sale_price = supplier_price / (1 - margin_decimal) if margin_decimal < 1 else supplier_price * 2
+                    old_price = self.items_data[idx]['price']
                     self.items_data[idx]['price'] = new_sale_price
+                    
+                    # Actualizar precio de venta en la base de datos
+                    if old_price != new_sale_price and 'material_id' in self.items_data[idx]:
+                        material_id = self.items_data[idx]['material_id']
+                        db.update_material_price(material_id, new_sale_price)
+                        material_updated = True
                     
                 else:  # column == '#6' - Cantidad
                     if new_value <= 0:
@@ -1094,6 +1151,10 @@ class QuoteEditor(tk.Toplevel):
                     self.items_data[idx]['quantity'] = new_value
                 
                 self._refresh_items()
+                
+                # Si se actualizó un material en la BD, recargar la lista de materiales
+                if material_updated:
+                    self._reload_materials_list()
             except ValueError as e:
                 messagebox.showerror('Error', str(e) if str(e) else 'Valor inválido')
             finally:
@@ -1264,8 +1325,8 @@ class QuoteEditor(tk.Toplevel):
         # Texto del total en negrita (el usuario puede editarlo)
         doc_text += "\nEl total de los trabajos presupuestados, incluyendo mano de obra, materiales, asciende a la cantidad de\n"
         
-        # Total centrado
-        total_text = f"{total:.2f} EUROS"
+        # Total centrado (formato español)
+        total_text = f"{format_price_es(total)} EUROS"
         doc_text += f"\t\t\t\t{total_text}\n\n"
         
         # IVA (mayúsculas y subrayado - el usuario puede aplicar formato)

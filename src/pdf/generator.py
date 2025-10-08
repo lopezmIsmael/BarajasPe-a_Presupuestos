@@ -11,6 +11,16 @@ from datetime import datetime
 
 BRAND_COLOR = HexColor('#2B7DE9')
 
+
+def format_price_es(value):
+    """
+    Formatea un precio en formato español:
+    - Punto como separador de miles
+    - Coma como separador decimal
+    """
+    return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 def export_quote_to_pdf(qid, out_path):
     """
     Genera PDF del presupuesto.
@@ -230,10 +240,10 @@ def export_quote_to_pdf(qid, out_path):
     c.drawCentredString(width / 2, y, text2)
     y -= 16
     
-    # Total - ÚNICO PRECIO MOSTRADO EN NEGRITA Y CENTRADO
+    # Total - ÚNICO PRECIO MOSTRADO EN NEGRITA Y CENTRADO (formato español)
     total_with_labor = total_materials + labor
     c.setFont('Helvetica-Bold', 14)
-    total_text = f"{total_with_labor:.2f} EUROS"
+    total_text = f"{format_price_es(total_with_labor)} EUROS"
     c.drawCentredString(width / 2, y, total_text)
     y -= 30
 

@@ -13,13 +13,16 @@ class PDFStyleEditor(ttk.Frame):
     Combina visualización estilo documento con capacidad de edición
     """
     
-    def __init__(self, parent, **kwargs):
+    def __init__(self, parent, regenerate_callback=None, **kwargs):
         super().__init__(parent)
         
         # Configuración del frame principal
         self.grid_rowconfigure(0, weight=0)  # Toolbar
         self.grid_rowconfigure(1, weight=1)  # Editor
         self.grid_columnconfigure(0, weight=1)
+        
+        # Callback para regenerar
+        self.regenerate_callback = regenerate_callback
         
         # Barra de herramientas
         self._create_toolbar()
@@ -32,45 +35,52 @@ class PDFStyleEditor(ttk.Frame):
     
     def _create_toolbar(self):
         """Crea la barra de herramientas con botones de formato"""
-        toolbar = ttk.Frame(self, style='Toolbar.TFrame')
-        toolbar.grid(row=0, column=0, sticky='ew', pady=(0, 10))
+        # Contenedor principal de la toolbar con fondo
+        toolbar = tk.Frame(self, bg='#f0f0f0', relief='flat', borderwidth=0)
+        toolbar.grid(row=0, column=0, sticky='ew', pady=(0, 5))
         
         # Contenedor interno con padding
-        toolbar_inner = ttk.Frame(toolbar)
-        toolbar_inner.pack(fill='x', padx=10, pady=5)
+        toolbar_inner = tk.Frame(toolbar, bg='#f0f0f0')
+        toolbar_inner.pack(fill='x', padx=10, pady=8)
         
-        # Tamaño de fuente
-        ttk.Label(toolbar_inner, text="Tamaño:", font=('Helvetica', 9)).pack(side='left', padx=(0, 5))
-        self.font_size_var = tk.StringVar(value="10")
-        font_combo = ttk.Combobox(toolbar_inner, textvariable=self.font_size_var, 
-                                  values=["8", "9", "10", "11", "12", "14", "16", "18", "20"],
-                                  width=5, state='readonly')
-        font_combo.pack(side='left', padx=(0, 10))
-        font_combo.bind('<<ComboboxSelected>>', lambda e: self._apply_font_size())
+        # Frame izquierdo para botones de formato
+        format_frame = tk.Frame(toolbar_inner, bg='#f0f0f0')
+        format_frame.pack(side='left')
         
-        # Separador
-        ttk.Separator(toolbar_inner, orient='vertical').pack(side='left', fill='y', padx=5)
+        # Etiqueta "Formato:"
+        format_label = tk.Label(format_frame, text="Formato:", bg='#f0f0f0', 
+                               font=('Helvetica', 9), fg='#666')
+        format_label.pack(side='left', padx=(0, 8))
         
         # Botón Negrita
-        bold_btn = ttk.Button(toolbar_inner, text="N", width=3, 
+        bold_btn = ttk.Button(format_frame, text="N", width=3, 
                              command=lambda: self._toggle_format('bold'))
         bold_btn.pack(side='left', padx=2)
         
         # Botón Subrayado
-        underline_btn = ttk.Button(toolbar_inner, text="S", width=3,
+        underline_btn = ttk.Button(format_frame, text="S", width=3,
                                    command=lambda: self._toggle_format('underline'))
         underline_btn.pack(side='left', padx=2)
         
         # Botón Tachado
-        strike_btn = ttk.Button(toolbar_inner, text="T", width=3,
+        strike_btn = ttk.Button(format_frame, text="T", width=3,
                                command=lambda: self._toggle_format('strikethrough'))
         strike_btn.pack(side='left', padx=2)
         
+        # Separador vertical
+        sep = tk.Frame(format_frame, bg='#ccc', width=2, height=20)
+        sep.pack(side='left', padx=8, pady=2)
         
         # Botón Viñeta
-        bullet_btn = ttk.Button(toolbar_inner, text="•", width=3,
+        bullet_btn = ttk.Button(format_frame, text="•", width=3,
                                command=self._insert_bullet)
         bullet_btn.pack(side='left', padx=2)
+        
+        # Frame derecho para botón de regenerar
+        if hasattr(self, 'regenerate_callback') and self.regenerate_callback:
+            regenerate_btn = ttk.Button(toolbar_inner, text="🔄 Regenerar", 
+                                       command=self.regenerate_callback)
+            regenerate_btn.pack(side='right', padx=5)
     
     def _create_paper_view(self):
         """Crea el área de edición con apariencia de hoja de papel"""
