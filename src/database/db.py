@@ -19,6 +19,12 @@ from .workers import (
     add_worker, get_worker, list_workers, update_worker, delete_worker
 )
 
+# Compatibilidad: algunas partes del código usan `db.create_quote` en vez de
+# `db.add_quote` o `db_quotes.add_quote`. Proporcionamos un envoltorio
+# `create_quote` que delega a `quotes.add_quote` y mantiene la firma esperada.
+def create_quote(client_id, client_name, client_address, client_dni, work_name, labor_cost=0, notes='', formatted_notes=None):
+    return quotes.add_quote(client_id, client_name, client_address, client_dni, work_name, labor_cost=labor_cost, notes=notes, formatted_notes=formatted_notes)
+
 ### CRUD Partes de Trabajo
 
 def add_work_report(work_name, date_start, date_end, client_name=None, quote_id=None, 

@@ -25,7 +25,9 @@ def list_materials():
     conn = get_conn()
     cur = conn.cursor()
     cur.execute('SELECT * FROM materials ORDER BY name')
-    materials = cur.fetchall()
+    rows = cur.fetchall()
+    # Convertir sqlite3.Row a dict para consumo más sencillo en la UI
+    materials = [dict(r) for r in rows]
     conn.close()
     return materials
 
@@ -34,9 +36,9 @@ def get_material(material_id):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute('SELECT * FROM materials WHERE id=?', (material_id,))
-    material = cur.fetchone()
+    row = cur.fetchone()
     conn.close()
-    return material
+    return dict(row) if row else None
 
 def update_material(material_id, name=None, description=None, image_path=None, price=None, supplier_price=None, category=None):
     """Actualiza un material"""

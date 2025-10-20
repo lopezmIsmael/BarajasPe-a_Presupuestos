@@ -25,18 +25,18 @@ def list_clients():
     conn = get_conn()
     cur = conn.cursor()
     cur.execute('SELECT * FROM clients ORDER BY name')
-    clients = cur.fetchall()
+    rows = cur.fetchall()
     conn.close()
-    return clients
+    return [dict(r) for r in rows]
 
 def get_client(client_id):
     """Obtiene un cliente por ID"""
     conn = get_conn()
     cur = conn.cursor()
     cur.execute('SELECT * FROM clients WHERE id=?', (client_id,))
-    client = cur.fetchone()
+    row = cur.fetchone()
     conn.close()
-    return client
+    return dict(row) if row else None
 
 def update_client(client_id, name, address=None, dni=None, phone=None, email=None):
     """Actualiza un cliente"""
@@ -78,20 +78,23 @@ def delete_client(client_id):
     conn.close()
 
 ### Quotes CRUD
-def add_quote(client_id, client_name, client_address, client_dni, work_name, labor_cost=0, notes=''):
-    """Añade un presupuesto"""
+def add_quote(client_id, client_name, client_address, client_dni, work_name, labor_cost=0, notes='', formatted_notes=None):
+    """Añade un presupuesto (soporta formatted_notes opcional).
+
+    Se añadió `formatted_notes` para almacenar el contenido WYSIWYG si se proporciona.
+    """
     conn = get_conn()
     cur = conn.cursor()
-    
+
     date = datetime.datetime.now().strftime('%Y-%m-%d')
-    
+
     cur.execute('''
         INSERT INTO quotes (
             client_id, client_name, client_address, client_dni,
-            work_name, date, labor_cost, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (client_id, client_name, client_address, client_dni, work_name, date, labor_cost, notes))
-    
+            work_name, date, labor_cost, notes, formatted_notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (client_id, client_name, client_address, client_dni, work_name, date, labor_cost, notes, formatted_notes))
+
     conn.commit()
     quote_id = cur.lastrowid
     conn.close()
@@ -102,9 +105,9 @@ def list_quotes():
     conn = get_conn()
     cur = conn.cursor()
     cur.execute('SELECT * FROM quotes ORDER BY date DESC')
-    quotes = cur.fetchall()
+    rows = cur.fetchall()
     conn.close()
-    return quotes
+    return [dict(r) for r in rows]
 
 def get_quote(quote_id):
     """Obtiene un presupuesto y sus items por ID"""
@@ -113,32 +116,39 @@ def get_quote(quote_id):
     
     # Obtener presupuesto
     cur.execute('SELECT * FROM quotes WHERE id=?', (quote_id,))
-    quote = cur.fetchone()
-    
-    if not quote:
+    row = cur.fetchone()
+
+    if not row:
         conn.close()
         return None, []
-    
+
+    quote = dict(row)
+
     # Obtener items
     cur.execute('SELECT * FROM quote_items WHERE quote_id=?', (quote_id,))
-    items = cur.fetchall()
-    
+    items_rows = cur.fetchall()
+    items = [dict(r) for r in items_rows]
+
     conn.close()
     return quote, items
 
 def update_quote(quote_id, client_id=None, client_name=None, client_address=None, 
-                client_dni=None, work_name=None, labor_cost=None, notes=None):
-    """Actualiza un presupuesto"""
+                client_dni=None, work_name=None, labor_cost=None, notes=None, formatted_notes=None):
+    """Actualiza un presupuesto (incluye formatted_notes).
+
+    Acepta formatted_notes y utiliza placeholders nombrados para evitar errores
+    con los parámetros.
+    """
     conn = get_conn()
     cur = conn.cursor()
-    
+
     # Obtener datos actuales
     cur.execute('SELECT * FROM quotes WHERE id=?', (quote_id,))
     current = cur.fetchone()
     if not current:
         conn.close()
         return False
-    
+
     # Actualizar solo los campos proporcionados
     update_data = {
         'client_id': client_id if client_id is not None else current['client_id'],
@@ -147,17 +157,20 @@ def update_quote(quote_id, client_id=None, client_name=None, client_address=None
         'client_dni': client_dni if client_dni is not None else current['client_dni'],
         'work_name': work_name if work_name is not None else current['work_name'],
         'labor_cost': labor_cost if labor_cost is not None else current['labor_cost'],
-        'notes': notes if notes is not None else current['notes']
+        'notes': notes if notes is not None else current['notes'],
+        'formatted_notes': formatted_notes if formatted_notes is not None else current.get('formatted_notes')
     }
-    
+
     cur.execute('''
         UPDATE quotes 
         SET client_id=:client_id, client_name=:client_name, 
             client_address=:client_address, client_dni=:client_dni,
-            work_name=:work_name, labor_cost=:labor_cost, notes=:notes
-        WHERE id=?
+            work_name=:work_name, labor_cost=:labor_cost, notes=:notes, formatted_notes=:formatted_notes,
+            
+            updated_at=CURRENT_TIMESTAMP
+        WHERE id=:id
     ''', {**update_data, 'id': quote_id})
-    
+
     conn.commit()
     conn.close()
     return True
@@ -176,18 +189,24 @@ def delete_quote(quote_id):
     conn.close()
 
 ### Quote Items CRUD
-def add_quote_item(quote_id, material_id, name, description, unit_price, quantity, supplier_price=0):
-    """Añade un item a un presupuesto"""
+def add_quote_item(quote_id, material_id, name, description, image_path, unit_price, quantity, supplier_price=0):
+    """Añade un item a un presupuesto.
+
+    Firma aceptada ahora:
+       add_quote_item(quote_id, material_id, name, description, image_path, unit_price, quantity, supplier_price=0)
+
+    Se agregó `image_path` para almacenar la ruta de la imagen asociada al item.
+    """
     conn = get_conn()
     cur = conn.cursor()
-    
+
     cur.execute('''
         INSERT INTO quote_items (
-            quote_id, material_id, name, description,
+            quote_id, material_id, name, description, image_path,
             unit_price, quantity, supplier_price
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (quote_id, material_id, name, description, unit_price, quantity, supplier_price))
-    
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (quote_id, material_id, name, description, image_path, unit_price, quantity, supplier_price))
+
     conn.commit()
     item_id = cur.lastrowid
     conn.close()

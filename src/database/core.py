@@ -76,6 +76,7 @@ def init_db():
         material_id INTEGER,
         name TEXT NOT NULL,
         description TEXT,
+        image_path TEXT,
         unit_price REAL NOT NULL,
         quantity INTEGER NOT NULL DEFAULT 1,
         supplier_price REAL DEFAULT 0,
@@ -85,6 +86,11 @@ def init_db():
     ''')
     
     cur.execute('CREATE INDEX IF NOT EXISTS idx_quote_items_quote ON quote_items(quote_id)')
+    # Migración: añadir columna image_path a quote_items si no existe
+    try:
+        cur.execute("ALTER TABLE quote_items ADD COLUMN image_path TEXT")
+    except sqlite3.OperationalError:
+        pass  # ya existe
     
     # Crear tabla de trabajadores
     cur.execute('''
