@@ -3,7 +3,7 @@ Gestión de partes de obra
 """
 import tkinter as tk
 from tkinter import ttk, simpledialog
-from src.database import db
+from src.database import db, quotes as db_quotes
 from src.ui.ui_utils import (
     center_window, create_styled_button, create_search_frame,
     create_treeview_with_scrollbar, show_info, show_error,
@@ -98,7 +98,7 @@ class WorkReportsFrame(ttk.Frame):
     
     def new_report(self):
         """Abre el diálogo para crear parte"""
-        WorkReportEditor(self, report_id=None, on_save=self.refresh)
+        WorkReportEditor(self, on_save=lambda: self.refresh())
     
     def edit_report(self):
         """Edita el parte seleccionado"""
@@ -108,7 +108,7 @@ class WorkReportsFrame(ttk.Frame):
             return
         
         report_id = int(selection[0])
-        WorkReportEditor(self, report_id=report_id, on_save=self.refresh)
+        WorkReportEditor(self, report_id=report_id, on_save=lambda: self.refresh())
     
     def delete_report(self):
         """Elimina el parte seleccionado"""
@@ -120,21 +120,50 @@ class WorkReportsFrame(ttk.Frame):
         report_id = int(selection[0])
         report = db.get_work_report(report_id)
         
-        if ask_yes_no('Confirmar', f'¿Eliminar parte "{report["work_name"]}"?', self):
+        if not report:
+            show_error('Error', 'El parte no existe', self)
+            return
+        
+        if not ask_yes_no('Confirmar', '¿Eliminar este parte?', self):
+            return
+        
+        try:
             db.delete_work_report(report_id)
             self.refresh()
             show_info('Éxito', 'Parte eliminado', self)
+        except Exception as e:
+            show_error('Error', f'Error al eliminar: {e}', self)
     
     def export_pdf(self):
-        """Exporta el parte a PDF"""
+        """Exporta a PDF el parte seleccionado"""
+        from tkinter import filedialog
+        from src.pdf.generator import export_work_report_to_pdf
+
         selection = self.tree.selection()
         if not selection:
             show_warning('Advertencia', 'Selecciona un parte', self)
             return
-        
+
         report_id = int(selection[0])
-        # TODO: Implementar exportación PDF
-        show_info('Info', 'Exportación PDF pendiente de implementar', self)
+        report = db.get_work_report(report_id)
+
+        if not report:
+            show_error('Error', 'El parte no existe', self)
+            return
+
+        # Diálogo para guardar archivo
+        filename = filedialog.asksaveasfilename(
+            defaultextension='.pdf',
+            filetypes=[('PDF', '*.pdf')],
+            initialfile=f"parte_obra_{report['work_name'].replace(' ', '_')}.pdf"
+        )
+
+        if filename:
+            try:
+                export_work_report_to_pdf(report_id, filename)
+                show_info('Éxito', f'PDF exportado a:\n{filename}', self)
+            except Exception as e:
+                show_error('Error', f'Error al exportar PDF:\n{e}', self)
 
 
 class WorkReportEditor(tk.Toplevel):
@@ -244,7 +273,7 @@ class WorkReportEditor(tk.Toplevel):
         
         # Bind para actualizar scroll region
         self.hours_table_frame.bind('<Configure>', 
-                                   lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+                                  lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
         
         self._render_hours_table()
     
@@ -367,7 +396,7 @@ class WorkReportEditor(tk.Toplevel):
         
         # Pedir cantidad
         quantity = simpledialog.askfloat('Cantidad', f'Cantidad de {material["name"]}:', 
-                                        initialvalue=1.0)
+                                       initialvalue=1.0)
         if quantity is None or quantity <= 0:
             return
         
@@ -377,6 +406,17 @@ class WorkReportEditor(tk.Toplevel):
             'quantity': quantity
         })
         self._refresh_materials()
+    
+    def _remove_material(self):
+        """Elimina el material seleccionado"""
+        selection = self.materials_tree.selection()
+        if not selection:
+            return
+        
+        idx = int(selection[0])
+        if 0 <= idx < len(self.materials_data):
+            del self.materials_data[idx]
+            self._refresh_materials()
     
     def _edit_material_quantity(self):
         """Edita la cantidad de un material"""
@@ -388,98 +428,11 @@ class WorkReportEditor(tk.Toplevel):
         material = self.materials_data[idx]
         
         new_quantity = simpledialog.askfloat('Editar Cantidad', 
-                                            f'Nueva cantidad de {material["name"]}:',
-                                            initialvalue=material['quantity'])
+                                          f'Nueva cantidad de {material["name"]}:',
+                                          initialvalue=material['quantity'])
         if new_quantity and new_quantity > 0:
             self.materials_data[idx]['quantity'] = new_quantity
             self._refresh_materials()
-    
-    def _render_hours_table(self):
-        """Renderiza la tabla de horas"""
-        # Limpiar tabla
-        for widget in self.hours_table_frame.winfo_children():
-            widget.destroy()
-        
-        # Encabezado: Trabajador | Fecha1 | Fecha2 | ... | TOTAL
-        ttk.Label(self.hours_table_frame, text='Trabajador', font=('Helvetica', 10, 'bold'),
-                 relief='solid', borderwidth=1, width=20).grid(row=0, column=0, sticky='ew')
-        
-        for col_idx, date in enumerate(self.dates, start=1):
-            ttk.Label(self.hours_table_frame, text=date, font=('Helvetica', 10, 'bold'),
-                     relief='solid', borderwidth=1, width=12).grid(row=0, column=col_idx, sticky='ew')
-        
-        ttk.Label(self.hours_table_frame, text='TOTAL', font=('Helvetica', 10, 'bold'),
-                 relief='solid', borderwidth=1, width=10).grid(row=0, column=len(self.dates)+1, sticky='ew')
-        
-        # Filas de trabajadores
-        workers = db.list_workers()
-        for row_idx, worker in enumerate(workers, start=1):
-            worker_id = worker['id']
-            
-            # Nombre trabajador
-            ttk.Label(self.hours_table_frame, text=f"{worker['name']} ({worker['role']})",
-                     relief='solid', borderwidth=1).grid(row=row_idx, column=0, sticky='ew')
-            
-            # Celdas de horas por fecha
-            total_hours = 0
-            for col_idx, date in enumerate(self.dates, start=1):
-                if worker_id not in self.workers_hours:
-                    self.workers_hours[worker_id] = {}
-                
-                hours = self.workers_hours[worker_id].get(date, 0)
-                total_hours += hours
-                
-                entry = ttk.Entry(self.hours_table_frame, width=10, justify='center')
-                entry.insert(0, str(hours) if hours else '')
-                entry.grid(row=row_idx, column=col_idx, padx=1, pady=1)
-                
-                # Bind para actualizar
-                entry.bind('<FocusOut>', lambda e, wid=worker_id, d=date: self._update_hours(wid, d, e.widget.get()))
-            
-            # Total de horas
-            ttk.Label(self.hours_table_frame, text=f"{total_hours:.1f}",
-                     relief='solid', borderwidth=1, font=('Helvetica', 10, 'bold')).grid(
-                         row=row_idx, column=len(self.dates)+1, sticky='ew')
-    
-    def _add_date_column(self):
-        """Añade una columna de fecha"""
-        date_str = simpledialog.askstring('Nueva Fecha', 'Fecha (DD/MM/YYYY):')
-        if date_str:
-            # Validar formato
-            try:
-                datetime.strptime(date_str, '%d/%m/%Y')
-                if date_str not in self.dates:
-                    self.dates.append(date_str)
-                    self._render_hours_table()
-            except ValueError:
-                show_error('Error', 'Formato de fecha inválido. Use DD/MM/YYYY', self)
-    
-    def _add_worker_row(self):
-        """Añade un trabajador (abre el gestor de trabajadores)"""
-        show_info('Info', 'Use la sección de Trabajadores para añadir nuevos trabajadores.\n'
-                          'Los trabajadores ya existentes aparecen automáticamente aquí.', self)
-    
-    def _update_hours(self, worker_id, date, value):
-        """Actualiza las horas de un trabajador en una fecha"""
-        try:
-            hours = float(value) if value.strip() else 0
-            if worker_id not in self.workers_hours:
-                self.workers_hours[worker_id] = {}
-            self.workers_hours[worker_id][date] = hours
-            self._render_hours_table()
-        except ValueError:
-            pass
-    
-    def _remove_material(self):
-        """Quita un material"""
-        selection = self.materials_tree.selection()
-        if not selection:
-            show_warning('Advertencia', 'Selecciona un material', self)
-            return
-        
-        idx = int(selection[0])
-        del self.materials_data[idx]
-        self._refresh_materials()
     
     def _refresh_materials(self):
         """Actualiza la tabla de materiales"""
@@ -491,59 +444,187 @@ class WorkReportEditor(tk.Toplevel):
                 mat['quantity']
             ))
     
+    def _render_hours_table(self):
+        """Renderiza la tabla de horas"""
+        # Limpiar tabla
+        for widget in self.hours_table_frame.winfo_children():
+            widget.destroy()
+        
+        # Si no hay fechas o trabajadores, mostrar mensaje
+        if not self.dates and not self.workers_hours:
+            ttk.Label(self.hours_table_frame, text='Sin datos. Añade fechas y trabajadores.').pack()
+            return
+        
+        # Ordenar fechas y obtener lista de trabajadores
+        self.dates.sort()
+        workers = sorted(self.workers_hours.keys())
+        
+        # Crear header con fechas
+        ttk.Label(self.hours_table_frame, text='Trabajador', width=30).grid(
+            row=0, column=0, sticky='ew', padx=5, pady=5
+        )
+        
+        for col, date in enumerate(self.dates, start=1):
+            ttk.Label(self.hours_table_frame, text=date).grid(
+                row=0, column=col, sticky='ew', padx=5, pady=5
+            )
+        
+        # Añadir filas de trabajadores
+        for row, worker_id in enumerate(workers, start=1):
+            worker = db.get_worker(worker_id)
+            if not worker:
+                continue
+            
+            worker_name = worker['name']
+            ttk.Label(self.hours_table_frame, text=worker_name).grid(
+                row=row, column=0, sticky='w', padx=5, pady=5
+            )
+            
+            # Celdas de horas
+            for col, date in enumerate(self.dates, start=1):
+                hours = self.workers_hours.get(worker_id, {}).get(date, 0)
+                cell = ttk.Entry(self.hours_table_frame, width=5)
+                cell.insert(0, str(hours))
+                cell.grid(row=row, column=col, padx=5, pady=5)
+                
+                # Bind para actualizar horas al cambiar
+                cell.bind('<FocusOut>', lambda e, w=worker_id, d=date, c=cell:
+                         self._update_hours(w, d, c))
+                cell.bind('<Return>', lambda e, w=worker_id, d=date, c=cell:
+                         self._update_hours(w, d, c))
+    
+    def _update_hours(self, worker_id, date, cell):
+        """Actualiza las horas de un trabajador en una fecha"""
+        try:
+            hours = float(cell.get())
+            if hours < 0:
+                raise ValueError
+        except ValueError:
+            cell.delete(0, tk.END)
+            cell.insert(0, '0')
+            hours = 0
+        
+        if worker_id not in self.workers_hours:
+            self.workers_hours[worker_id] = {}
+        self.workers_hours[worker_id][date] = hours
+    
+    def _add_date_column(self):
+        """Añade una nueva fecha"""
+        # Seleccionar fecha (podríamos usar un calendar widget mejor)
+        new_date = datetime.today().strftime('%Y-%m-%d')
+        
+        if new_date in self.dates:
+            show_warning('Advertencia', 'Esta fecha ya está añadida', self)
+            return
+        
+        self.dates.append(new_date)
+        self._render_hours_table()
+    
+    def _add_worker_row(self):
+        """Añade un nuevo trabajador"""
+        # Mostrar diálogo de selección de trabajador
+        workers = db.list_workers()
+        
+        # Filtrar trabajadores ya añadidos
+        available_workers = [w for w in workers if w['id'] not in self.workers_hours]
+        
+        if not available_workers:
+            show_warning('Advertencia', 'No hay más trabajadores disponibles', self)
+            return
+        
+        # Crear ventana de selección
+        dialog = tk.Toplevel(self)
+        dialog.title('Seleccionar Trabajador')
+        dialog.geometry('300x400')
+        center_window(dialog, 300, 400)
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        # Lista de trabajadores
+        frame = ttk.Frame(dialog, padding=10)
+        frame.pack(fill='both', expand=True)
+        
+        scrollbar = ttk.Scrollbar(frame)
+        scrollbar.pack(side='right', fill='y')
+        
+        listbox = tk.Listbox(frame, yscrollcommand=scrollbar.set)
+        listbox.pack(fill='both', expand=True, pady=(0, 10))
+        scrollbar.config(command=listbox.yview)
+        
+        for worker in available_workers:
+            listbox.insert(tk.END, worker['name'])
+        
+        def on_select():
+            selection = listbox.curselection()
+            if not selection:
+                return
+            
+            worker = available_workers[selection[0]]
+            self.workers_hours[worker['id']] = {}
+            self._render_hours_table()
+            dialog.destroy()
+        
+        ttk.Button(frame, text='Seleccionar', command=on_select).pack(side='right', padx=5)
+        ttk.Button(frame, text='Cancelar', command=dialog.destroy).pack(side='right')
+    
     def _load_data(self):
-        """Carga datos del parte si se está editando"""
+        """Carga datos del parte si se está editando o datos del presupuesto si es nuevo"""
+        # Inicializar/limpiar datos
+        self.materials_data = []
+        self.dates = []
+        self.workers_hours = {}
+
         if self.report_id:
+            # Cargar datos del parte existente
             report = db.get_work_report(self.report_id)
-            if report:
-                self.work_name_entry.insert(0, report['work_name'])
-                self.client_entry.insert(0, report['client_name'] or '')
-                
-                # Cargar horas
-                hours = db.list_work_hours(self.report_id)
-                for hour in hours:
-                    date = hour['date']
-                    if date not in self.dates:
-                        self.dates.append(date)
-                    
-                    worker_id = hour['worker_id']
-                    if worker_id not in self.workers_hours:
-                        self.workers_hours[worker_id] = {}
-                    self.workers_hours[worker_id][date] = hour['hours']
-                
-                # Cargar materiales
-                materials = db.list_work_materials(self.report_id)
-                for mat in materials:
-                    self.materials_data.append({
-                        'material_id': mat['material_id'],
-                        'name': mat['name'],
-                        'quantity': mat['quantity']
-                    })
-                
-                self._render_hours_table()
-                self._refresh_materials()
+            if not report:
+                return
+            
+            # Datos básicos
+            self.work_name_entry.insert(0, report['work_name'])
+            self.client_entry.insert(0, report['client_name'] or '')
+            
+            # Cargar horas desde work_report_assignments
+            if 'workers' in report:
+                for worker_id, worker_data in report['workers'].items():
+                    self.workers_hours[worker_id] = {}
+                    for assignment in worker_data['assignments']:
+                        date = assignment['date']
+                        if date not in self.dates:
+                            self.dates.append(date)
+                        self.workers_hours[worker_id][date] = assignment['hours']
+
+            # Cargar materiales desde work_report_materials
+            if 'materials' in report:
+                for date, materials in report['materials'].items():
+                    for mat in materials:
+                        self.materials_data.append({
+                            'material_id': mat['id'],
+                            'name': mat['name'],
+                            'quantity': mat['quantity']
+                        })
         
         elif self.quote_id:
-            # Si viene de un presupuesto, cargar datos automáticamente
-            quote, items = db.get_quote(self.quote_id)
-            if quote:
-                try:
-                    work_name = quote['work_name'] or 'Obra'
-                except (KeyError, IndexError):
-                    work_name = 'Obra'
-                
-                self.work_name_entry.insert(0, work_name)
-                self.client_entry.insert(0, quote['client_name'] or '')
-                
-                # Cargar materiales del presupuesto
-                for item in items:
-                    self.materials_data.append({
-                        'material_id': item['material_id'],
-                        'name': item['name'],
-                        'quantity': item['quantity']
-                    })
-                
-                self._refresh_materials()
+            # Cargar datos del presupuesto
+            quote, quote_items = db_quotes.get_quote(self.quote_id)
+            if not quote:
+                return
+            
+            # Datos básicos
+            self.work_name_entry.insert(0, quote['work_name'])
+            self.client_entry.insert(0, quote['client_name'] or '')
+            
+            # Cargar materiales del presupuesto
+            for item in quote_items:
+                self.materials_data.append({
+                    'material_id': item['material_id'],
+                    'name': item['name'],
+                    'quantity': item['quantity']
+                })
+        
+        # Actualizar las vistas
+        self._render_hours_table()
+        self._refresh_materials()
     
     def _save(self):
         """Guarda el parte"""
@@ -557,29 +638,57 @@ class WorkReportEditor(tk.Toplevel):
         try:
             if self.report_id:
                 # Actualizar parte existente
-                db.update_work_report(self.report_id, work_name, client_name, '')
+                db.update_work_report(
+                    self.report_id,
+                    work_name=work_name,
+                    client_name=client_name
+                )
                 report_id = self.report_id
-                
-                # Eliminar horas y materiales antiguos para reemplazar
+
+                # Eliminar asignaciones y materiales antiguos para reemplazar
                 conn = db.get_conn()
                 cur = conn.cursor()
-                cur.execute('DELETE FROM work_report_hours WHERE report_id=?', (report_id,))
+                cur.execute('DELETE FROM work_report_assignments WHERE report_id=?', (report_id,))
                 cur.execute('DELETE FROM work_report_materials WHERE report_id=?', (report_id,))
                 conn.commit()
                 conn.close()
             else:
-                # Crear nuevo parte
-                report_id = db.add_work_report(self.quote_id, work_name, client_name)
-            
-            # Guardar horas
+                # Crear nuevo parte (usar fecha de hoy si no hay fechas)
+                today = datetime.today().strftime('%Y-%m-%d')
+                date_start = min(self.dates) if self.dates else today
+                date_end = max(self.dates) if self.dates else today
+
+                report_id = db.add_work_report(
+                    work_name=work_name,
+                    date_start=date_start,
+                    date_end=date_end,
+                    client_name=client_name,
+                    quote_id=self.quote_id
+                )
+
+            # Guardar asignaciones de trabajo
             for worker_id, dates_hours in self.workers_hours.items():
                 for date, hours in dates_hours.items():
                     if hours > 0:
-                        db.add_work_hour(report_id, worker_id, date, hours)
-            
-            # Guardar materiales
+                        db.add_work_assignment(
+                            report_id=report_id,
+                            worker_id=worker_id,
+                            date=date,
+                            hours=hours
+                        )
+
+            # Guardar materiales (usar primera fecha o hoy)
+            today = datetime.today().strftime('%Y-%m-%d')
+            material_date = self.dates[0] if self.dates else today
+
             for mat in self.materials_data:
-                db.add_work_material(report_id, mat['material_id'], mat['name'], mat['quantity'])
+                db.add_work_material(
+                    report_id=report_id,
+                    date=material_date,
+                    material_id=mat['material_id'],
+                    material_name=mat['name'],
+                    quantity=mat['quantity']
+                )
             
             show_info('Éxito', 'Parte guardado correctamente', self)
             

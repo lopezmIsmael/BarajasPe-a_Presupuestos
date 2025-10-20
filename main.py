@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
-from src.database import db
+from src.database import db, quotes as db_quotes
 from src.config.settings import (
     COMPANY_NAME, MAIN_WINDOW_SIZE, MAIN_WINDOW_TITLE, 
     HAS_TTKBOOTSTRAP, ICONS
@@ -233,7 +233,7 @@ class ModernApp:
         self.materials_frame.refresh()
         self.clients_frame.refresh()
         
-        quotes_count = len(db.list_quotes())
+        quotes_count = len(db_quotes.list_quotes())
         self.status_label.config(text=f"Actualizado - {quotes_count} presupuestos")
 
 

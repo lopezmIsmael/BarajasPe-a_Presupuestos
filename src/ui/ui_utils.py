@@ -241,10 +241,12 @@ def show_info(title, message, parent=None):
     """Muestra un diálogo de información siempre al frente"""
     from tkinter import messagebox
     if parent:
-        parent.lift()
-        parent.attributes('-topmost', True)
+        # Obtener la ventana principal
+        root = parent.winfo_toplevel()
+        root.lift()
+        root.attributes('-topmost', True)
         result = messagebox.showinfo(title, message, parent=parent)
-        parent.attributes('-topmost', False)
+        root.attributes('-topmost', False)
     else:
         result = messagebox.showinfo(title, message)
     return result
@@ -287,3 +289,202 @@ def ask_yes_no(title, message, parent=None):
     else:
         result = messagebox.askyesno(title, message)
     return result
+
+
+def format_price_es(price):
+    """Formatea un precio en estilo español con punto de miles y coma decimal"""
+    if price is None:
+        return "0,00 €"
+
+    # Convertir a float y formatear
+    price_float = float(price)
+    formatted = f"{price_float:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    return f"{formatted} €"
+
+
+# ============================================================================
+# CLASES BASE PARA ELIMINAR CÓDIGO DUPLICADO
+# ============================================================================
+
+class BaseCRUDFrame(ttk.Frame):
+    """
+    Clase base para frames CRUD con búsqueda, tabla y botones estándar.
+    Elimina código duplicado entre MaterialsFrame, ClientsFrame, WorkersFrame, etc.
+    """
+
+    def __init__(self, master, app):
+        super().__init__(master)
+        self.app = app
+        self._setup_ui()
+        self.refresh()
+
+    def _setup_ui(self):
+        """Configura la interfaz (puede sobreescribirse)"""
+        # Barra de búsqueda
+        self.search_var = tk.StringVar()
+        self.search_var.trace('w', lambda *args: self.refresh())
+        search_frame, search_entry = create_search_frame(self, self.search_var)
+
+        # Tabla (subclases deben definir get_columns, get_headings, get_column_widths)
+        columns = self.get_columns()
+        headings = self.get_headings()
+        column_widths = self.get_column_widths()
+
+        tree_frame, self.tree = create_treeview_with_scrollbar(
+            self, columns, headings, column_widths
+        )
+
+        # Doble click para editar
+        self.tree.bind('<Double-Button-1>', lambda e: self.edit())
+
+        # Botones de acción
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(fill='x', padx=10, pady=10)
+
+        # Obtener configuración de botones de subclase
+        for btn_config in self.get_buttons_config():
+            text, command, style = btn_config
+            create_styled_button(
+                btn_frame, text, command, style
+            ).pack(side='left', padx=5)
+
+    def refresh(self):
+        """Actualiza la lista (debe implementarse en subclases)"""
+        raise NotImplementedError("Subclases deben implementar refresh()")
+
+    def add(self):
+        """Añade un nuevo elemento (debe implementarse en subclases)"""
+        raise NotImplementedError("Subclases deben implementar add()")
+
+    def edit(self):
+        """Edita el elemento seleccionado (debe implementarse en subclases)"""
+        raise NotImplementedError("Subclases deben implementar edit()")
+
+    def delete(self):
+        """Elimina el elemento seleccionado (debe implementarse en subclases)"""
+        raise NotImplementedError("Subclases deben implementar delete()")
+
+    def get_columns(self):
+        """Retorna tupla de nombres de columnas (debe implementarse en subclases)"""
+        raise NotImplementedError("Subclases deben implementar get_columns()")
+
+    def get_headings(self):
+        """Retorna tupla de encabezados de columnas (debe implementarse en subclases)"""
+        raise NotImplementedError("Subclases deben implementar get_headings()")
+
+    def get_column_widths(self):
+        """Retorna tupla de anchos de columnas (debe implementarse en subclases)"""
+        raise NotImplementedError("Subclases deben implementar get_column_widths()")
+
+    def get_buttons_config(self):
+        """
+        Retorna lista de configuraciones de botones.
+        Por defecto: Nuevo, Editar, Eliminar
+        Formato: [(text, command, style), ...]
+        """
+        return [
+            ('+ Nuevo', self.add, 'success'),
+            ('✏️ Editar', self.edit, 'primary'),
+            ('🗑️ Eliminar', self.delete, 'danger')
+        ]
+
+    def _refresh_tree_with_data(self, data_list, filter_func=None, format_func=None):
+        """
+        Método helper para refrescar el árbol con datos.
+
+        Args:
+            data_list: Lista de diccionarios con datos
+            filter_func: Función que retorna True si el item debe mostrarse
+            format_func: Función que formatea un item a tupla de valores
+        """
+        # Limpiar tabla
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        # Obtener término de búsqueda
+        search_term = self.search_var.get().lower()
+
+        # Configurar tags para filas alternadas
+        self.tree.tag_configure('oddrow', background='#FFFFFF')
+        self.tree.tag_configure('evenrow', background='#F0F4F8')
+
+        row_count = 0
+        for item_data in data_list:
+            # Filtro personalizado
+            if filter_func and not filter_func(item_data, search_term):
+                continue
+
+            # Alternar colores
+            tag = 'evenrow' if row_count % 2 == 0 else 'oddrow'
+
+            # Formatear valores
+            if format_func:
+                values = format_func(item_data)
+            else:
+                values = tuple(item_data.values())
+
+            # Insertar en el árbol
+            item_id = str(item_data.get('id', row_count))
+            self.tree.insert('', 'end', iid=item_id, values=values, tags=(tag,))
+
+            row_count += 1
+
+
+class BaseEditor(tk.Toplevel):
+    """
+    Clase base para editores modales.
+    Elimina código duplicado de ventanas de edición.
+    """
+
+    def __init__(self, parent, item_id=None, on_save=None, title=None, width=600, height=400):
+        super().__init__(parent)
+        self.item_id = item_id
+        self.on_save = on_save
+
+        # Configurar ventana
+        self.title(title or ('Editar' if item_id else 'Nuevo'))
+        self.geometry(f'{width}x{height}')
+        center_window(self, width, height)
+
+        # Configurar como modal
+        self.transient(parent)
+        self.grab_set()
+
+        # Setup UI primero (las subclases deben establecer sus atributos aquí)
+        self._setup_ui()
+        # Cargar datos después (ahora los atributos de subclase ya existen)
+        self._load_data()
+        # Atajos de teclado al final
+        self._setup_keyboard_shortcuts()
+
+    def _setup_ui(self):
+        """Configura la interfaz (debe implementarse en subclases)"""
+        raise NotImplementedError("Subclases deben implementar _setup_ui()")
+
+    def _load_data(self):
+        """Carga datos si se está editando (debe implementarse en subclases)"""
+        pass
+
+    def _save(self):
+        """Guarda los datos (debe implementarse en subclases)"""
+        raise NotImplementedError("Subclases deben implementar _save()")
+
+    def _setup_keyboard_shortcuts(self):
+        """Configura atajos de teclado comunes"""
+        self.bind('<Escape>', lambda e: self.destroy())
+        self.bind('<Control-s>', lambda e: self._save())
+
+    def _create_buttons_frame(self):
+        """Crea el frame de botones estándar (Guardar/Cancelar)"""
+        btn_frame = ttk.Frame(self, padding=10)
+        btn_frame.pack(fill='x', side='bottom')
+
+        create_styled_button(
+            btn_frame, '💾 Guardar', self._save, 'success'
+        ).pack(side='right', padx=5)
+
+        create_styled_button(
+            btn_frame, '❌ Cancelar', self.destroy, 'secondary'
+        ).pack(side='right', padx=5)
+
+        return btn_frame

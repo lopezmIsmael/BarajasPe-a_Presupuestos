@@ -1,574 +1,395 @@
-import sqlite3
-from pathlib import Path
+"""
+Módulo de acceso a base de datos - Punto de entrada principal
+"""
 import datetime
+from .core import get_conn, init_db
+from . import quotes, materials, workers
 
-# Ruta ajustada para la nueva estructura - apunta a data/
-DB_PATH = Path(__file__).parent.parent.parent / "data" / "data.db"
+# Re-exportar funciones comunes
+from .quotes import (
+    add_quote, get_quote, list_quotes, update_quote, delete_quote,
+    add_quote_item, update_quote_item, delete_quote_item,
+    add_client, get_client, list_clients, update_client, delete_client
+)
+from .materials import (
+    add_material, get_material, list_materials, update_material, delete_material,
+    list_material_categories
+)
+from .workers import (
+    add_worker, get_worker, list_workers, update_worker, delete_worker
+)
 
-def get_conn():
-    # Crear el directorio data si no existe
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+### CRUD Partes de Trabajo
 
-def init_db():
+def add_work_report(work_name, date_start, date_end, client_name=None, quote_id=None, 
+                   tools_used='', notes=''):
+    """
+    Crea un nuevo parte de trabajo.
+    
+    Args:
+        work_name (str): Nombre del trabajo
+        date_start (str): Fecha de inicio (YYYY-MM-DD)
+        date_end (str): Fecha de fin (YYYY-MM-DD)
+        client_name (str, opcional): Nombre del cliente
+        quote_id (int, opcional): ID del presupuesto asociado
+        tools_used (str, opcional): Herramientas usadas
+        notes (str, opcional): Notas adicionales
+        
+    Returns:
+        int: ID del parte creado
+    """
     conn = get_conn()
     cur = conn.cursor()
     
-    # Primero crear las tablas
-    cur.execute('''
-    CREATE TABLE IF NOT EXISTS materials (
-        id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        description TEXT,
-        image_path TEXT,
-        price REAL NOT NULL DEFAULT 0,
-        supplier_price REAL DEFAULT 0,
-        category TEXT DEFAULT "Sin categoría"
-    )
-    ''')
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_materials_name ON materials(name)')
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_materials_category ON materials(category)')
-    cur.execute('''
-    CREATE TABLE IF NOT EXISTS clients (
-        id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        address TEXT,
-        dni TEXT,
-        phone TEXT,
-        email TEXT
-    )
-    ''')
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name)')
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_clients_dni ON clients(dni)')
-    cur.execute('''
-    CREATE TABLE IF NOT EXISTS quotes (
-        id INTEGER PRIMARY KEY,
-        client_id INTEGER,
-        client_name TEXT,
-        client_address TEXT,
-        client_dni TEXT,
-        work_name TEXT,
-        date TEXT,
-        labor_cost REAL DEFAULT 0,
-        notes TEXT,
-        FOREIGN KEY(client_id) REFERENCES clients(id)
-    )
-    ''')
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_quotes_date ON quotes(date)')
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_quotes_client ON quotes(client_name)')
-    cur.execute('''
-    CREATE TABLE IF NOT EXISTS quote_items (
-        id INTEGER PRIMARY KEY,
-        quote_id INTEGER NOT NULL,
-        material_id INTEGER,
-        name TEXT NOT NULL,
-        description TEXT,
-        image_path TEXT,
-        unit_price REAL NOT NULL,
-        supplier_price REAL DEFAULT 0,
-        quantity REAL NOT NULL,
-        FOREIGN KEY(quote_id) REFERENCES quotes(id),
-        FOREIGN KEY(material_id) REFERENCES materials(id)
-    )
-    ''')
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_quote_items_quote ON quote_items(quote_id)')
-    
-    # Migraciones: Añadir columnas si no existen (para bases de datos existentes)
-    # Migración: Añadir columna work_name si no existe
-    try:
-        cur.execute("SELECT work_name FROM quotes LIMIT 1")
-    except sqlite3.OperationalError:
-        # La columna no existe, añadirla
-        cur.execute("ALTER TABLE quotes ADD COLUMN work_name TEXT")
-        conn.commit()
-    
-    # Migración: Añadir columna supplier_price a materials si no existe
-    try:
-        cur.execute("SELECT supplier_price FROM materials LIMIT 1")
-    except sqlite3.OperationalError:
-        # La columna no existe, añadirla
-        cur.execute("ALTER TABLE materials ADD COLUMN supplier_price REAL DEFAULT 0")
-        conn.commit()
-    
-    # Migración: Añadir columna formatted_notes a quotes si no existe
-    try:
-        cur.execute("SELECT formatted_notes FROM quotes LIMIT 1")
-    except sqlite3.OperationalError:
-        # La columna no existe, añadirla
-        cur.execute("ALTER TABLE quotes ADD COLUMN formatted_notes TEXT")
-        conn.commit()
-    
-    # Migración: Añadir columna supplier_price a quote_items si no existe
-    try:
-        cur.execute("SELECT supplier_price FROM quote_items LIMIT 1")
-    except sqlite3.OperationalError:
-        # La columna no existe, añadirla
-        cur.execute("ALTER TABLE quote_items ADD COLUMN supplier_price REAL DEFAULT 0")
-        conn.commit()
-    
-    # Tablas para partes de obra
-    cur.execute('''
-    CREATE TABLE IF NOT EXISTS workers (
-        id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        phone TEXT,
-        role TEXT NOT NULL
-    )
-    ''')
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_workers_name ON workers(name)')
-    
-    cur.execute('''
-    CREATE TABLE IF NOT EXISTS work_reports (
-        id INTEGER PRIMARY KEY,
-        quote_id INTEGER,
-        work_name TEXT NOT NULL,
-        client_name TEXT,
-        date_created TEXT,
-        notes TEXT,
-        FOREIGN KEY(quote_id) REFERENCES quotes(id)
-    )
-    ''')
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_work_reports_quote ON work_reports(quote_id)')
-    
-    cur.execute('''
-    CREATE TABLE IF NOT EXISTS work_report_hours (
-        id INTEGER PRIMARY KEY,
-        report_id INTEGER NOT NULL,
-        worker_id INTEGER NOT NULL,
-        date TEXT NOT NULL,
-        hours REAL NOT NULL,
-        FOREIGN KEY(report_id) REFERENCES work_reports(id),
-        FOREIGN KEY(worker_id) REFERENCES workers(id)
-    )
-    ''')
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_work_hours_report ON work_report_hours(report_id)')
-    
-    cur.execute('''
-    CREATE TABLE IF NOT EXISTS work_report_materials (
-        id INTEGER PRIMARY KEY,
-        report_id INTEGER NOT NULL,
-        material_id INTEGER,
-        name TEXT NOT NULL,
-        quantity REAL NOT NULL,
-        FOREIGN KEY(report_id) REFERENCES work_reports(id),
-        FOREIGN KEY(material_id) REFERENCES materials(id)
-    )
-    ''')
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_work_materials_report ON work_report_materials(report_id)')
-    
-    conn.commit()
-    conn.close()
-
-### Materials CRUD
-def add_material(name, description, image_path, price, category="Sin categoría", supplier_price=0):
-    # Normalizar categoría para evitar duplicados con diferente capitalización
-    normalized_category = normalize_category(category)
-    
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('INSERT INTO materials (name,description,image_path,price,supplier_price,category) VALUES (?,?,?,?,?,?)',
-                (name, description, image_path, price, supplier_price, normalized_category))
-    conn.commit()
-    mid = cur.lastrowid
-    conn.close()
-    return mid
-
-def update_material(mid, name, description, image_path, price, category="Sin categoría", supplier_price=0):
-    # Normalizar categoría para evitar duplicados con diferente capitalización
-    normalized_category = normalize_category(category)
-    
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('UPDATE materials SET name=?,description=?,image_path=?,price=?,supplier_price=?,category=? WHERE id=?',
-                (name, description, image_path, price, supplier_price, normalized_category, mid))
-    conn.commit()
-    conn.close()
-
-def delete_material(mid):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('DELETE FROM materials WHERE id=?', (mid,))
-    conn.commit()
-    conn.close()
-
-def update_material_price(mid, price):
-    """Actualiza solo el precio de venta de un material"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('UPDATE materials SET price=? WHERE id=?', (price, mid))
-    conn.commit()
-    conn.close()
-
-def update_material_supplier_price(mid, supplier_price):
-    """Actualiza solo el precio de proveedor de un material"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('UPDATE materials SET supplier_price=? WHERE id=?', (supplier_price, mid))
-    conn.commit()
-    conn.close()
-
-def list_materials():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('SELECT * FROM materials ORDER BY name')
-    rows = cur.fetchall()
-    conn.close()
-    return rows
-
-def get_material(mid):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('SELECT * FROM materials WHERE id=?', (mid,))
-    row = cur.fetchone()
-    conn.close()
-    return row
-
-def search_materials(query):
-    """Search materials by name, description or category"""
-    conn = get_conn()
-    cur = conn.cursor()
-    search_term = f'%{query}%'
-    cur.execute('''SELECT * FROM materials 
-                   WHERE name LIKE ? OR description LIKE ? OR category LIKE ?
-                   ORDER BY name''',
-                (search_term, search_term, search_term))
-    rows = cur.fetchall()
-    conn.close()
-    return rows
-
-def get_categories():
-    """Get all unique categories"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('SELECT DISTINCT category FROM materials ORDER BY category')
-    rows = cur.fetchall()
-    conn.close()
-    return [r['category'] for r in rows]
-
-def normalize_category(category):
-    """Normaliza la categoría para que coincida con una existente (case-insensitive)"""
-    if not category or category.strip() == '':
-        return 'Sin categoría'
-    
-    category_input = category.strip()
-    
-    # Obtener todas las categorías existentes
-    existing_categories = get_categories()
-    
-    # Crear un mapeo de lowercase a la versión original
-    category_map = {cat.lower(): cat for cat in existing_categories if cat}
-    
-    # Buscar coincidencia case-insensitive
-    category_lower = category_input.lower()
-    if category_lower in category_map:
-        return category_map[category_lower]
-    
-    # Si no existe, devolver la versión con capitalización del usuario
-    return category_input
-
-### Clients CRUD
-def add_client(name, address, dni, phone, email):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('INSERT INTO clients (name,address,dni,phone,email) VALUES (?,?,?,?,?)',
-                (name, address, dni, phone, email))
-    conn.commit()
-    cid = cur.lastrowid
-    conn.close()
-    return cid
-
-def update_client(cid, name, address, dni, phone, email):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('UPDATE clients SET name=?,address=?,dni=?,phone=?,email=? WHERE id=?',
-                (name, address, dni, phone, email, cid))
-    conn.commit()
-    conn.close()
-
-def delete_client(cid):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('DELETE FROM clients WHERE id=?', (cid,))
-    conn.commit()
-    conn.close()
-
-def list_clients():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('SELECT * FROM clients ORDER BY name')
-    rows = cur.fetchall()
-    conn.close()
-    return rows
-
-def get_client(cid):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('SELECT * FROM clients WHERE id=?', (cid,))
-    row = cur.fetchone()
-    conn.close()
-    return row
-
-### Quotes
-def create_quote(client_id, client_name, client_address, client_dni, work_name=None, labor_cost=0, notes=None, formatted_notes=None):
-    conn = get_conn()
-    cur = conn.cursor()
-    date = datetime.date.today().isoformat()
-    cur.execute('''INSERT INTO quotes (client_id,client_name,client_address,client_dni,work_name,date,labor_cost,notes,formatted_notes)
-                   VALUES (?,?,?,?,?,?,?,?,?)''',
-                (client_id, client_name, client_address, client_dni, work_name, date, labor_cost, notes, formatted_notes))
-    conn.commit()
-    qid = cur.lastrowid
-    conn.close()
-    return qid
-
-def add_quote_item(quote_id, material_id, name, description, image_path, unit_price, quantity, supplier_price=0):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('''INSERT INTO quote_items (quote_id,material_id,name,description,image_path,unit_price,supplier_price,quantity)
-                   VALUES (?,?,?,?,?,?,?,?)''',
-                (quote_id, material_id, name, description, image_path, unit_price, supplier_price, quantity))
-    conn.commit()
-    iid = cur.lastrowid
-    conn.close()
-    return iid
-
-def list_quotes():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('SELECT * FROM quotes ORDER BY date DESC')
-    rows = cur.fetchall()
-    conn.close()
-    return rows
-
-def get_quote(qid):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('SELECT * FROM quotes WHERE id=?', (qid,))
-    quote = cur.fetchone()
-    cur.execute('SELECT * FROM quote_items WHERE quote_id=?', (qid,))
-    items = cur.fetchall()
-    conn.close()
-    return quote, items
-
-def delete_quote(qid):
-    """Delete a quote and all its items"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('DELETE FROM quote_items WHERE quote_id=?', (qid,))
-    cur.execute('DELETE FROM quotes WHERE id=?', (qid,))
-    conn.commit()
-    conn.close()
-
-def update_quote(qid, client_id, client_name, client_address, client_dni, work_name=None, labor_cost=0, notes=None, formatted_notes=None):
-    """Update quote header info"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('''UPDATE quotes SET client_id=?,client_name=?,client_address=?,client_dni=?,work_name=?,labor_cost=?,notes=?,formatted_notes=?
-                   WHERE id=?''',
-                (client_id, client_name, client_address, client_dni, work_name, labor_cost, notes, formatted_notes, qid))
-    conn.commit()
-    conn.close()
-
-def delete_quote_item(item_id):
-    """Delete a single item from a quote"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('DELETE FROM quote_items WHERE id=?', (item_id,))
-    conn.commit()
-    conn.close()
-
-def update_quote_item(item_id, quantity, unit_price):
-    """Update quantity or price of a quote item"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('UPDATE quote_items SET quantity=?, unit_price=? WHERE id=?',
-                (quantity, unit_price, item_id))
-    conn.commit()
-    conn.close()
-
-
-### Workers CRUD
-def add_worker(name, phone, role):
-    """Añade un trabajador"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('INSERT INTO workers (name, phone, role) VALUES (?, ?, ?)',
-                (name, phone, role))
-    conn.commit()
-    wid = cur.lastrowid
-    conn.close()
-    return wid
-
-def list_workers():
-    """Lista todos los trabajadores"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('SELECT * FROM workers ORDER BY name')
-    rows = cur.fetchall()
-    conn.close()
-    return rows
-
-def get_worker(worker_id):
-    """Obtiene un trabajador por ID"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('SELECT * FROM workers WHERE id=?', (worker_id,))
-    row = cur.fetchone()
-    conn.close()
-    return row
-
-def update_worker(worker_id, name, phone, role):
-    """Actualiza un trabajador"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('UPDATE workers SET name=?, phone=?, role=? WHERE id=?',
-                (name, phone, role, worker_id))
-    conn.commit()
-    conn.close()
-
-def delete_worker(worker_id):
-    """Elimina un trabajador"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('DELETE FROM workers WHERE id=?', (worker_id,))
-    conn.commit()
-    conn.close()
-
-
-### Work Reports CRUD
-def add_work_report(quote_id, work_name, client_name, notes=''):
-    """Crea un parte de obra"""
-    conn = get_conn()
-    cur = conn.cursor()
-    date_created = datetime.datetime.now().strftime('%Y-%m-%d')
-    cur.execute('''INSERT INTO work_reports (quote_id, work_name, client_name, date_created, notes)
-                   VALUES (?, ?, ?, ?, ?)''',
-                (quote_id, work_name, client_name, date_created, notes))
-    conn.commit()
-    rid = cur.lastrowid
-    conn.close()
-    return rid
-
-def list_work_reports(quote_id=None):
-    """Lista partes de obra, opcionalmente filtrados por presupuesto"""
-    conn = get_conn()
-    cur = conn.cursor()
+    # Obtener datos del presupuesto si se proporciona
     if quote_id:
-        cur.execute('SELECT * FROM work_reports WHERE quote_id=? ORDER BY date_created DESC', (quote_id,))
-    else:
-        cur.execute('SELECT * FROM work_reports ORDER BY date_created DESC')
-    rows = cur.fetchall()
-    conn.close()
-    return rows
-
-def get_work_report(report_id):
-    """Obtiene un parte de obra por ID"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('SELECT * FROM work_reports WHERE id=?', (report_id,))
-    row = cur.fetchone()
-    conn.close()
-    return row
-
-def update_work_report(report_id, work_name, client_name, notes):
-    """Actualiza un parte de obra"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('UPDATE work_reports SET work_name=?, client_name=?, notes=? WHERE id=?',
-                (work_name, client_name, notes, report_id))
+        quote, items = quotes.get_quote(quote_id)
+        if quote:
+            client_name = client_name or quote['client_name']
+    
+    # Crear el parte
+    cur.execute('''
+        INSERT INTO work_reports (
+            work_name, client_name, start_date, end_date, quote_id,
+            tools_used, notes, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        work_name, client_name, date_start, date_end, quote_id,
+        tools_used, notes, 'En progreso'
+    ))
+    
+    report_id = cur.lastrowid
+    
+    # Si hay presupuesto, importar materiales del presupuesto
+    if quote_id and quote:
+        for item in items:
+            # Crear una entrada por cada material del presupuesto
+            cur.execute('''
+                INSERT INTO work_report_materials (
+                    report_id, date, material_id, material_name, quantity
+                ) VALUES (?, ?, ?, ?, 0)
+            ''', (
+                report_id, date_start, item['material_id'], item['name']
+            ))
+    
     conn.commit()
     conn.close()
+    return report_id
+
+def list_work_reports(quote_id=None, include_details=False):
+    """
+    Lista partes de obra, opcionalmente filtrados por presupuesto.
+    
+    Args:
+        quote_id (int, opcional): ID del presupuesto para filtrar
+        include_details (bool, opcional): Si True, incluye trabajadores y materiales
+        
+    Returns:
+        list: Lista de partes encontrados
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    if quote_id:
+        cur.execute('''
+            SELECT * FROM work_reports 
+            WHERE quote_id=?
+            ORDER BY start_date DESC
+        ''', (quote_id,))
+    else:
+        cur.execute('SELECT * FROM work_reports ORDER BY start_date DESC')
+    
+    reports = []
+    for row in cur.fetchall():
+        report = dict(row)
+        
+        if include_details:
+            # Obtener lista de trabajadores únicos
+            cur.execute('''
+                SELECT DISTINCT w.name
+                FROM work_report_assignments a
+                JOIN workers w ON w.id = a.worker_id
+                WHERE a.report_id=?
+                ORDER BY w.name
+            ''', (report['id'],))
+            report['workers'] = [r['name'] for r in cur.fetchall()]
+            
+            # Obtener lista de materiales únicos
+            cur.execute('''
+                SELECT DISTINCT material_name
+                FROM work_report_materials
+                WHERE report_id=?
+                ORDER BY material_name
+            ''', (report['id'],))
+            report['materials'] = [r['material_name'] for r in cur.fetchall()]
+        
+        reports.append(report)
+    
+    conn.close()
+    return reports
+
+def get_work_report(report_id, include_details=True):
+    """
+    Obtiene un parte de trabajo por ID
+    
+    Args:
+        report_id (int): ID del parte a obtener
+        include_details (bool, opcional): Si True, incluye asignaciones y materiales
+        
+    Returns:
+        dict: Datos del parte o None si no existe
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # Obtener datos básicos
+    cur.execute('SELECT * FROM work_reports WHERE id=?', (report_id,))
+    report = cur.fetchone()
+    if not report:
+        conn.close()
+        return None
+    
+    # Convertir a diccionario
+    report_dict = dict(report)
+    
+    if include_details:
+        # Obtener asignaciones de trabajo agrupadas por trabajador y fecha
+        assignments_by_worker = {}
+        cur.execute('''
+            SELECT a.*, w.name as worker_name
+            FROM work_report_assignments a
+            JOIN workers w ON w.id = a.worker_id
+            WHERE a.report_id=?
+            ORDER BY a.date, w.name
+        ''', (report_id,))
+        
+        for row in cur.fetchall():
+            worker_id = row['worker_id']
+            if worker_id not in assignments_by_worker:
+                assignments_by_worker[worker_id] = {
+                    'name': row['worker_name'],
+                    'assignments': []
+                }
+            assignments_by_worker[worker_id]['assignments'].append({
+                'date': row['date'],
+                'hours': row['hours'],
+                'task': row['task']
+            })
+        
+        report_dict['workers'] = assignments_by_worker
+        
+        # Obtener materiales agrupados por fecha
+        materials_by_date = {}
+        cur.execute('''
+            SELECT * FROM work_report_materials
+            WHERE report_id=?
+            ORDER BY date, material_name
+        ''', (report_id,))
+        
+        for row in cur.fetchall():
+            date = row['date']
+            if date not in materials_by_date:
+                materials_by_date[date] = []
+            materials_by_date[date].append({
+                'id': row['material_id'],
+                'name': row['material_name'],
+                'quantity': row['quantity'],
+                'notes': row['notes']
+            })
+        
+        report_dict['materials'] = materials_by_date
+    
+    conn.close()
+    return report_dict
+
+def update_work_report(report_id, work_name=None, client_name=None, 
+                      date_start=None, date_end=None, tools_used=None, 
+                      notes=None, status=None):
+    """
+    Actualiza los datos básicos de un parte de trabajo
+    
+    Args:
+        report_id (int): ID del parte a actualizar
+        work_name (str, opcional): Nuevo nombre del trabajo
+        client_name (str, opcional): Nuevo nombre del cliente
+        date_start (str, opcional): Nueva fecha inicial (YYYY-MM-DD)
+        date_end (str, opcional): Nueva fecha final (YYYY-MM-DD)
+        tools_used (str, opcional): Nuevas herramientas usadas
+        notes (str, opcional): Nuevas notas adicionales
+        status (str, opcional): Nuevo estado del parte
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # Obtener datos actuales
+    cur.execute('SELECT * FROM work_reports WHERE id=?', (report_id,))
+    current = cur.fetchone()
+    if not current:
+        conn.close()
+        return False
+    
+    # Actualizar solo los campos proporcionados
+    update_data = {
+        'work_name': work_name if work_name is not None else current['work_name'],
+        'client_name': client_name if client_name is not None else current['client_name'],
+        'start_date': date_start if date_start is not None else current['start_date'],
+        'end_date': date_end if date_end is not None else current['end_date'],
+        'tools_used': tools_used if tools_used is not None else current['tools_used'],
+        'notes': notes if notes is not None else current['notes'],
+        'status': status if status is not None else current['status']
+    }
+    
+    # Ejecutar actualización
+    cur.execute('''
+        UPDATE work_reports
+        SET work_name=:work_name,
+            client_name=:client_name,
+            start_date=:start_date,
+            end_date=:end_date,
+            tools_used=:tools_used,
+            notes=:notes,
+            status=:status,
+            updated_at=CURRENT_TIMESTAMP
+        WHERE id=:id
+    ''', {**update_data, 'id': report_id})
+    
+    conn.commit()
+    conn.close()
+    return True
+
+def add_work_assignment(report_id, worker_id, date, task=None, hours=0):
+    """
+    Añade o actualiza una asignación de trabajo
+    
+    Args:
+        report_id (int): ID del parte
+        worker_id (int): ID del trabajador
+        date (str): Fecha (YYYY-MM-DD)
+        task (str, opcional): Descripción de la tarea
+        hours (float, opcional): Horas trabajadas
+    
+    Returns:
+        int: ID de la asignación creada
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # Comprobar si ya existe una asignación para ese día
+    cur.execute('''
+        SELECT id FROM work_report_assignments
+        WHERE report_id=? AND worker_id=? AND date=?
+    ''', (report_id, worker_id, date))
+    
+    existing = cur.fetchone()
+    if existing:
+        # Actualizar existente
+        cur.execute('''
+            UPDATE work_report_assignments
+            SET task=?, hours=?
+            WHERE id=?
+        ''', (task, hours, existing['id']))
+        assignment_id = existing['id']
+    else:
+        # Crear nueva
+        cur.execute('''
+            INSERT INTO work_report_assignments (
+                report_id, worker_id, date, task, hours
+            ) VALUES (?, ?, ?, ?, ?)
+        ''', (report_id, worker_id, date, task, hours))
+        assignment_id = cur.lastrowid
+    
+    # Actualizar timestamp del parte
+    cur.execute('''
+        UPDATE work_reports
+        SET updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+    ''', (report_id,))
+    
+    conn.commit()
+    conn.close()
+    return assignment_id
+
+def add_work_material(report_id, date, material_id=None, material_name=None, quantity=0, notes=None):
+    """
+    Añade o actualiza un material usado en el parte
+    
+    Args:
+        report_id (int): ID del parte
+        date (str): Fecha de uso (YYYY-MM-DD)
+        material_id (int, opcional): ID del material
+        material_name (str, opcional): Nombre del material
+        quantity (float, opcional): Cantidad usada
+        notes (str, opcional): Notas adicionales
+    
+    Returns:
+        int: ID del uso de material creado
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # Si se proporciona material_id, obtener el nombre
+    if material_id and not material_name:
+        cur.execute('SELECT name FROM materials WHERE id=?', (material_id,))
+        result = cur.fetchone()
+        if result:
+            material_name = result['name']
+    
+    # Si solo hay nombre, buscar el id
+    elif material_name and not material_id:
+        cur.execute('SELECT id FROM materials WHERE name=?', (material_name,))
+        result = cur.fetchone()
+        if result:
+            material_id = result['id']
+    
+    if not material_name:
+        raise ValueError('Se requiere al menos el nombre del material')
+    
+    # Comprobar si ya existe para esa fecha
+    cur.execute('''
+        SELECT id FROM work_report_materials
+        WHERE report_id=? AND date=? AND material_id=?
+    ''', (report_id, date, material_id))
+    
+    existing = cur.fetchone()
+    if existing:
+        # Actualizar existente
+        cur.execute('''
+            UPDATE work_report_materials
+            SET quantity=?, notes=?
+            WHERE id=?
+        ''', (quantity, notes, existing['id']))
+        material_usage_id = existing['id']
+    else:
+        # Crear nuevo
+        cur.execute('''
+            INSERT INTO work_report_materials (
+                report_id, date, material_id, material_name, quantity, notes
+            ) VALUES (?, ?, ?, ?, ?, ?)
+        ''', (report_id, date, material_id, material_name, quantity, notes))
+        material_usage_id = cur.lastrowid
+    
+    # Actualizar timestamp del parte
+    cur.execute('''
+        UPDATE work_reports
+        SET updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+    ''', (report_id,))
+    
+    conn.commit()
+    conn.close()
+    return material_usage_id
 
 def delete_work_report(report_id):
-    """Elimina un parte de obra y sus datos relacionados"""
+    """Elimina un parte de trabajo y sus datos relacionados"""
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute('DELETE FROM work_report_hours WHERE report_id=?', (report_id,))
+    
+    # Eliminar relaciones
+    cur.execute('DELETE FROM work_report_assignments WHERE report_id=?', (report_id,))
     cur.execute('DELETE FROM work_report_materials WHERE report_id=?', (report_id,))
+    
+    # Eliminar parte principal
     cur.execute('DELETE FROM work_reports WHERE id=?', (report_id,))
-    conn.commit()
-    conn.close()
-
-
-### Work Report Hours CRUD
-def add_work_hour(report_id, worker_id, date, hours):
-    """Añade horas de trabajo"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('''INSERT INTO work_report_hours (report_id, worker_id, date, hours)
-                   VALUES (?, ?, ?, ?)''',
-                (report_id, worker_id, date, hours))
-    conn.commit()
-    hid = cur.lastrowid
-    conn.close()
-    return hid
-
-def list_work_hours(report_id):
-    """Lista horas de un parte de obra"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('''SELECT h.*, w.name, w.role 
-                   FROM work_report_hours h
-                   JOIN workers w ON h.worker_id = w.id
-                   WHERE h.report_id=?
-                   ORDER BY h.date, w.role DESC, w.name''', (report_id,))
-    rows = cur.fetchall()
-    conn.close()
-    return rows
-
-def update_work_hour(hour_id, hours):
-    """Actualiza horas de trabajo"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('UPDATE work_report_hours SET hours=? WHERE id=?', (hours, hour_id))
-    conn.commit()
-    conn.close()
-
-def delete_work_hour(hour_id):
-    """Elimina horas de trabajo"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('DELETE FROM work_report_hours WHERE id=?', (hour_id,))
-    conn.commit()
-    conn.close()
-
-
-### Work Report Materials CRUD
-def add_work_material(report_id, material_id, name, quantity):
-    """Añade material a un parte de obra"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('''INSERT INTO work_report_materials (report_id, material_id, name, quantity)
-                   VALUES (?, ?, ?, ?)''',
-                (report_id, material_id, name, quantity))
-    conn.commit()
-    mid = cur.lastrowid
-    conn.close()
-    return mid
-
-def list_work_materials(report_id):
-    """Lista materiales de un parte de obra"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('SELECT * FROM work_report_materials WHERE report_id=? ORDER BY name', (report_id,))
-    rows = cur.fetchall()
-    conn.close()
-    return rows
-
-def update_work_material(material_id, quantity):
-    """Actualiza cantidad de material"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('UPDATE work_report_materials SET quantity=? WHERE id=?', (quantity, material_id))
-    conn.commit()
-    conn.close()
-
-def delete_work_material(material_id):
-    """Elimina material de un parte de obra"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('DELETE FROM work_report_materials WHERE id=?', (material_id,))
+    
     conn.commit()
     conn.close()

@@ -4,21 +4,13 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from reportlab.lib.colors import HexColor
 from pathlib import Path
-from src.database.db import get_quote
+from src.database.quotes import get_quote
 from PIL import Image
 from src.pdf.formatter import render_formatted_notes
+from src.ui.ui_utils import format_price_es
 from datetime import datetime
 
 BRAND_COLOR = HexColor('#2B7DE9')
-
-
-def format_price_es(value):
-    """
-    Formatea un precio en formato español:
-    - Punto como separador de miles
-    - Coma como separador decimal
-    """
-    return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def export_quote_to_pdf(qid, out_path):
@@ -460,5 +452,149 @@ def export_document_to_pdf(formatted_content, out_path):
         
         i += 1
     
+    c.showPage()
+    c.save()
+
+
+def export_work_report_to_pdf(report_id, out_path):
+    """
+    Genera PDF del parte de obra con información de horas y materiales.
+    """
+    from src.database import db
+
+    report = db.get_work_report(report_id, include_details=True)
+    if not report:
+        raise ValueError('Parte de obra no encontrado')
+
+    out_path = Path(out_path)
+    c = canvas.Canvas(str(out_path), pagesize=A4)
+    width, height = A4
+    margin = 25 * mm
+    y = height - margin
+
+    # Título del documento
+    c.setFont('Helvetica-Bold', 18)
+    c.setFillColor(BRAND_COLOR)
+    c.drawString(margin, y, "PARTE DE OBRA")
+    y -= 30
+
+    c.setFillColor(HexColor('#000000'))
+
+    # Información básica del parte
+    c.setFont('Helvetica-Bold', 12)
+    c.drawString(margin, y, "INFORMACIÓN DEL PARTE")
+    y -= 20
+
+    c.setFont('Helvetica', 10)
+    c.drawString(margin, y, f"Obra: {report['work_name']}")
+    y -= 15
+
+    if report.get('client_name'):
+        c.drawString(margin, y, f"Cliente: {report['client_name']}")
+        y -= 15
+
+    c.drawString(margin, y, f"Fecha inicio: {report['start_date']}")
+    y -= 15
+    c.drawString(margin, y, f"Fecha fin: {report['end_date']}")
+    y -= 15
+    c.drawString(margin, y, f"Estado: {report.get('status', 'En progreso')}")
+    y -= 25
+
+    # Sección de horas de trabajo
+    if report.get('workers'):
+        c.setFont('Helvetica-Bold', 12)
+        c.drawString(margin, y, "HORAS DE TRABAJO")
+        y -= 20
+
+        # Tabla de horas
+        c.setFont('Helvetica-Bold', 9)
+        c.drawString(margin, y, "Trabajador")
+        c.drawString(margin + 80*mm, y, "Fecha")
+        c.drawString(margin + 120*mm, y, "Horas")
+        y -= 15
+
+        c.setLineWidth(0.5)
+        c.line(margin, y + 5, width - margin, y + 5)
+        y -= 5
+
+        total_hours = 0
+        c.setFont('Helvetica', 9)
+
+        for worker_id, worker_data in report['workers'].items():
+            worker_name = worker_data['name']
+
+            for assignment in worker_data['assignments']:
+                if y < 50*mm:
+                    c.showPage()
+                    y = height - margin
+
+                c.drawString(margin, y, worker_name)
+                c.drawString(margin + 80*mm, y, assignment['date'])
+                c.drawString(margin + 120*mm, y, f"{assignment['hours']:.1f}h")
+                total_hours += assignment['hours']
+                y -= 12
+
+        # Total de horas
+        y -= 5
+        c.setFont('Helvetica-Bold', 10)
+        c.drawString(margin + 120*mm, y, f"Total: {total_hours:.1f}h")
+        y -= 25
+
+    # Sección de materiales
+    if report.get('materials'):
+        if y < 100*mm:
+            c.showPage()
+            y = height - margin
+
+        c.setFont('Helvetica-Bold', 12)
+        c.drawString(margin, y, "MATERIALES UTILIZADOS")
+        y -= 20
+
+        # Tabla de materiales
+        c.setFont('Helvetica-Bold', 9)
+        c.drawString(margin, y, "Material")
+        c.drawString(margin + 80*mm, y, "Fecha")
+        c.drawString(margin + 120*mm, y, "Cantidad")
+        y -= 15
+
+        c.setLineWidth(0.5)
+        c.line(margin, y + 5, width - margin, y + 5)
+        y -= 5
+
+        c.setFont('Helvetica', 9)
+
+        for date, materials in sorted(report['materials'].items()):
+            for mat in materials:
+                if y < 50*mm:
+                    c.showPage()
+                    y = height - margin
+
+                c.drawString(margin, y, mat['name'])
+                c.drawString(margin + 80*mm, y, date)
+                c.drawString(margin + 120*mm, y, f"{mat['quantity']:.0f}")
+                y -= 12
+
+        y -= 15
+
+    # Notas adicionales
+    if report.get('notes'):
+        if y < 80*mm:
+            c.showPage()
+            y = height - margin
+
+        c.setFont('Helvetica-Bold', 12)
+        c.drawString(margin, y, "NOTAS")
+        y -= 20
+
+        c.setFont('Helvetica', 9)
+        # Dividir notas en líneas
+        notes_lines = report['notes'].split('\n')
+        for line in notes_lines:
+            if y < 50*mm:
+                c.showPage()
+                y = height - margin
+            c.drawString(margin, y, line[:90])  # Limitar ancho
+            y -= 12
+
     c.showPage()
     c.save()

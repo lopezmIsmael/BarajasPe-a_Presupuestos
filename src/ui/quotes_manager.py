@@ -3,7 +3,7 @@ Gestión de presupuestos - Interface y lógica
 """
 import tkinter as tk
 from tkinter import ttk, filedialog, simpledialog
-from src.database import db
+from src.database import db, quotes as db_quotes
 from src.pdf.generator import export_quote_to_pdf, export_document_to_pdf
 from src.pdf.preview import generate_quote_preview
 from src.ui.wysiwyg_editor import PDFStyleEditor
@@ -12,21 +12,13 @@ from src.config.settings import QUOTE_EDITOR_SIZE, QUOTE_VIEWER_SIZE, PDF_FILETY
 from src.ui.ui_utils import (
     center_window, create_styled_button, create_search_frame,
     create_treeview_with_scrollbar, create_button_frame,
-    bind_keyboard_shortcuts, show_info, show_error, show_warning, ask_yes_no
+    bind_keyboard_shortcuts, show_info, show_error, show_warning, ask_yes_no,
+    format_price_es
 )
 from src.ui.materials_manager import MaterialEditor
 from src.ui.clients_manager import ClientEditor
 from PIL import Image, ImageTk
 from datetime import datetime
-
-
-def format_price_es(value):
-    """
-    Formatea un precio en formato español:
-    - Punto como separador de miles
-    - Coma como separador decimal
-    """
-    return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 class QuotesFrame(ttk.Frame):
@@ -79,7 +71,7 @@ class QuotesFrame(ttk.Frame):
         
         # Filtrar presupuestos
         search_term = self.search_var.get().lower()
-        quotes = db.list_quotes()
+        quotes = db_quotes.list_quotes()
         
         row_count = 0
         for quote in quotes:
@@ -96,7 +88,7 @@ class QuotesFrame(ttk.Frame):
                     continue
             
             # Calcular total
-            _, items = db.get_quote(quote['id'])
+            _, items = db_quotes.get_quote(quote['id'])
             total = sum(item['unit_price'] * item['quantity'] for item in items)
             total += quote['labor_cost'] or 0
             
@@ -120,8 +112,8 @@ class QuotesFrame(ttk.Frame):
         self.context_menu.add_command(label="✏️ Editar Presupuesto", command=self.edit_quote)
         self.context_menu.add_command(label="📄 Exportar PDF", command=self.export_pdf)
         self.context_menu.add_separator()
-        self.context_menu.add_command(label="📋 Crear Parte de Obra", command=self.create_work_report)
-        self.context_menu.add_command(label="📋 Ver Partes de Obra", command=self.view_work_reports)
+        self.context_menu.add_command(label="📋 Añadir parte de trabajo", command=self.create_work_report)
+        self.context_menu.add_command(label="📋 Ver partes de trabajo", command=self.view_work_reports)
     
     def _show_context_menu(self, event):
         """Muestra el menú contextual"""
@@ -188,7 +180,7 @@ class QuotesFrame(ttk.Frame):
         
         if ask_yes_no('Confirmar', confirm_msg, self):
             try:
-                db.delete_quote(quote_id)
+                db_quotes.delete_quote(quote_id)
                 self.refresh()
                 show_info('Éxito', 'Presupuesto eliminado correctamente', self)
             except Exception as e:
@@ -262,7 +254,7 @@ class QuoteViewer(tk.Toplevel):
     def _setup_ui(self):
         """Configura la interfaz de usuario"""
         # Obtener datos del presupuesto
-        quote, items = db.get_quote(self.quote_id)
+        quote, items = db_quotes.get_quote(self.quote_id)
         
         # Header con información del presupuesto
         self._create_header(quote)
@@ -1023,9 +1015,17 @@ class QuoteEditor(tk.Toplevel):
             tag = 'evenrow' if i % 2 == 0 else 'oddrow'
             
             # Obtener precio de proveedor (items_data es dict, sí tiene .get())
-            supplier_price = item.get('supplier_price', 0) or 0
-            sale_price = item['price']
-            
+            # Asegurar conversión a float
+            try:
+                supplier_price = float(item.get('supplier_price', 0) or 0)
+            except (ValueError, TypeError):
+                supplier_price = 0.0
+
+            try:
+                sale_price = float(item['price'])
+            except (ValueError, TypeError):
+                sale_price = 0.0
+
             # Calcular beneficio y margen
             benefit = sale_price - supplier_price
             margin = ((benefit / sale_price) * 100) if sale_price > 0 else 0
@@ -1252,7 +1252,7 @@ class QuoteEditor(tk.Toplevel):
             print("DEBUG: Nuevo presupuesto, sin datos que cargar")
             return
         
-        quote, items = db.get_quote(self.quote_id)
+        quote, items = db_quotes.get_quote(self.quote_id)
         if not quote:
             show_error('Error', 'Presupuesto no encontrado', self)
             self.destroy()
@@ -1467,15 +1467,15 @@ class QuoteEditor(tk.Toplevel):
             # Crear o actualizar presupuesto
             if self.quote_id:
                 # Actualizar presupuesto existente
-                db.update_quote(
+                db_quotes.update_quote(
                     self.quote_id, client_id, client_name, 
                     client_address, client_dni, work_name=work_name, 
                     labor_cost=labor_cost, notes=notes, formatted_notes=formatted_notes
                 )
                 # Eliminar items antiguos y añadir nuevos
-                quote, old_items = db.get_quote(self.quote_id)
+                quote, old_items = db_quotes.get_quote(self.quote_id)
                 for old_item in old_items:
-                    db.delete_quote_item(old_item['id'])
+                    db_quotes.delete_quote_item(old_item['id'])
                 quote_id = self.quote_id
             else:
                 # Crear nuevo presupuesto
@@ -1490,7 +1490,7 @@ class QuoteEditor(tk.Toplevel):
                 # Obtener precio de proveedor (items_data es dict, sí tiene .get())
                 supplier_price = item.get('supplier_price', 0) or 0
                 
-                db.add_quote_item(
+                db_quotes.add_quote_item(
                     quote_id, item['material_id'], item['name'],
                     item['description'], item['image_path'],
                     item['price'], item['quantity'], supplier_price

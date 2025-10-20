@@ -4,22 +4,23 @@ Configuración global de la aplicación
 from pathlib import Path
 
 COMPANY_NAME = "Barajas Peña SL"
-BRAND_COLOR_PRIMARY = "#2B7DE9"
-BRAND_COLOR_SECONDARY = "#5BA3F5"
-BRAND_COLOR_ACCENT = "#1E5CBE"
-BRAND_COLOR_SUCCESS = "#4CAF50"
-BRAND_COLOR_WARNING = "#FFC107"
-BRAND_COLOR_DANGER = "#F44336"
-BRAND_COLOR_LIGHT = "#E3F2FD"
+# Paleta de colores moderna y minimalista
+BRAND_COLOR_PRIMARY = "#1E88E5"  # Azul más suave
+BRAND_COLOR_SECONDARY = "#64B5F6"  # Azul claro
+BRAND_COLOR_ACCENT = "#0D47A1"  # Azul oscuro
+BRAND_COLOR_SUCCESS = "#43A047"  # Verde más natural
+BRAND_COLOR_WARNING = "#FFA726"  # Naranja suave
+BRAND_COLOR_DANGER = "#E53935"  # Rojo más suave
+BRAND_COLOR_LIGHT = "#E3F2FD"  # Azul muy claro
 BRAND_COLOR_WHITE = "#FFFFFF"
-BRAND_COLOR_TEXT = "#263238"
-BRAND_COLOR_TEXT_LIGHT = "#546E7A"
+BRAND_COLOR_TEXT = "#212121"  # Negro más suave
+BRAND_COLOR_TEXT_LIGHT = "#757575"  # Gris medio
 
 HEADER_GRADIENT = f"linear-gradient(135deg, {BRAND_COLOR_PRIMARY} 0%, {BRAND_COLOR_SECONDARY} 100%)"
-SIDEBAR_COLOR = "#FAFBFC"
-CARD_SHADOW = "0 2px 8px rgba(43, 125, 233, 0.15)"
+SIDEBAR_COLOR = "#FAFAFA"  # Gris muy claro
+CARD_SHADOW = "0 1px 3px rgba(0, 0, 0, 0.12)"  # Sombra más sutil
 CARD_BACKGROUND = "#FFFFFF"
-BACKGROUND_COLOR = "#F5F8FA"
+BACKGROUND_COLOR = "#FAFAFA"  # Fondo más limpio
 
 # Rutas ajustadas para la nueva estructura
 APP_DIR = Path(__file__).parent.parent.parent  # Subir a raíz del proyecto

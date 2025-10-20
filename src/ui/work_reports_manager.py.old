@@ -1,0 +1,1082 @@
+"""
+Gestión de partes de obra
+"""
+import tkinter as tk
+from tkinter import ttk, simpledialog, StringVar, Toplevel
+from src.database import db
+from src.ui.ui_utils import (
+    center_window, create_styled_button, create_search_frame,
+    create_treeview_with_scrollbar, show_info, show_error,
+    show_warning, ask_yes_no, create_clients_combobox,
+    create_quotes_combobox, create_date_entry
+)
+from datetime import datetime, timedelta
+
+
+class WorkReportsFrame(ttk.Frame):
+    """Frame para gestión de partes de obra"""
+    
+    def __init__(self, master, app):
+        super().__init__(master)
+        self.app = app
+        self._setup_ui()
+        self.refresh()
+    
+    def _setup_ui(self):
+        """Configura la interfaz"""
+        # Barra de búsqueda
+        self.search_var = tk.StringVar()
+        self.search_var.trace('w', lambda *args: self.refresh())
+        search_frame, search_entry = create_search_frame(self, self.search_var)
+        
+        # Tabla de partes
+        columns = ('id', 'work_name', 'client', 'date_range', 'quote_id', 'workers', 'status')
+        headings = ('#', 'Obra', 'Cliente', 'Periodo', 'Presupuesto', 'Trabajadores', 'Estado')
+        column_widths = (50, 200, 150, 150, 100, 150, 100)
+        
+        tree_frame, self.tree = create_treeview_with_scrollbar(
+            self, columns, headings, column_widths
+        )
+        
+        # Doble click para editar
+        self.tree.bind('<Double-Button-1>', lambda e: self.edit_report())
+        
+        # Panel de botones principal
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(fill='x', padx=10, pady=5)
+        
+        left_btns = ttk.Frame(btn_frame)
+        left_btns.pack(side='left', fill='x')
+        
+        # Botones principales
+        create_styled_button(
+            left_btns, '+ Nuevo Parte', self.new_report, 'success'
+        ).pack(side='left', padx=5)
+        
+        create_styled_button(
+            left_btns, '✏️ Editar', self.edit_report, 'primary'
+        ).pack(side='left', padx=5)
+        
+        create_styled_button(
+            left_btns, '🗑️ Eliminar', self.delete_report, 'danger'
+        ).pack(side='left', padx=5)
+        
+        # Botones de exportación
+        right_btns = ttk.Frame(btn_frame)
+        right_btns.pack(side='right', fill='x')
+        
+        create_styled_button(
+            right_btns, '📄 Exportar PDF', self.export_pdf, 'info'
+        ).pack(side='right', padx=5)
+        
+        create_styled_button(
+            right_btns, '� Exportar Excel', self.export_excel, 'info'
+        ).pack(side='right', padx=5)
+        
+        # Panel de filtros
+        filter_frame = ttk.LabelFrame(self, text='Filtros')
+        filter_frame.pack(fill='x', padx=10, pady=5)
+        
+        # Primera fila de filtros
+        filter_row1 = ttk.Frame(filter_frame)
+        filter_row1.pack(fill='x', padx=5, pady=5)
+        
+        ttk.Label(filter_row1, text='Periodo:').pack(side='left', padx=5)
+        self.date_filter = ttk.Combobox(filter_row1, width=15, values=[
+            'Todos', 'Esta semana', 'Este mes', 'Último mes', 'Este año'
+        ])
+        self.date_filter.set('Este mes')
+        self.date_filter.pack(side='left', padx=5)
+        self.date_filter.bind('<<ComboboxSelected>>', lambda e: self.refresh())
+        
+        ttk.Label(filter_row1, text='Cliente:').pack(side='left', padx=5)
+        self.client_filter = ttk.Entry(filter_row1, width=20)
+        self.client_filter.pack(side='left', padx=5)
+        self.client_filter.bind('<KeyRelease>', lambda e: self.refresh())
+        
+        # Segunda fila de filtros
+        filter_row2 = ttk.Frame(filter_frame)
+        filter_row2.pack(fill='x', padx=5, pady=5)
+        
+        ttk.Label(filter_row2, text='Estado:').pack(side='left', padx=5)
+        self.status_filter = ttk.Combobox(filter_row2, width=15, values=[
+            'Todos', 'En progreso', 'Completado', 'Facturado'
+        ])
+        self.status_filter.set('Todos')
+        self.status_filter.pack(side='left', padx=5)
+        self.status_filter.bind('<<ComboboxSelected>>', lambda e: self.refresh())
+        
+        ttk.Label(filter_row2, text='Trabajador:').pack(side='left', padx=5)
+        self.worker_filter = ttk.Entry(filter_row2, width=20)
+        self.worker_filter.pack(side='left', padx=5)
+        self.worker_filter.bind('<KeyRelease>', lambda e: self.refresh())
+    
+    def refresh(self):
+        """Actualiza la lista de partes"""
+        # Limpiar tabla
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        # Obtener filtros
+        search_term = self.search_var.get().lower()
+        date_filter = self.date_filter.get()
+        status_filter = self.status_filter.get()
+        client_filter = self.client_filter.get().lower()
+        worker_filter = self.worker_filter.get().lower()
+        
+        # Cargar partes
+        reports = db.list_work_reports()
+        
+        # Configurar tags para filas alternadas y estados
+        self.tree.tag_configure('oddrow', background='#FFFFFF')
+        self.tree.tag_configure('evenrow', background='#F0F4F8')
+        self.tree.tag_configure('in-progress', foreground='#1976D2')  # Azul
+        self.tree.tag_configure('completed', foreground='#388E3C')    # Verde
+        self.tree.tag_configure('invoiced', foreground='#7B1FA2')    # Morado
+        
+        row_count = 0
+        for report in reports:
+            # Aplicar filtros
+            if not self._report_matches_filters(
+                report, search_term, date_filter, 
+                status_filter, client_filter, worker_filter
+            ):
+                continue
+            
+            # Preparar datos para mostrar
+            tags = ['evenrow' if row_count % 2 == 0 else 'oddrow']
+            tags.append(report['status'].lower().replace(' ', '-'))
+            
+            quote_text = f"#{report['quote_id']}" if report['quote_id'] else 'Sin presup.'
+            date_range = f"{report['start_date']} - {report['end_date']}"
+            workers_text = ', '.join(report['workers']) if report['workers'] else 'Sin asignar'
+            
+            # Insertar en tabla
+            self.tree.insert('', 'end', iid=str(report['id']), values=(
+                report['id'],
+                report['work_name'],
+                report['client_name'] or '',
+                date_range,
+                quote_text,
+                workers_text,
+                report['status']
+            ), tags=tuple(tags))
+            
+            row_count += 1
+            
+    def _report_matches_filters(self, report, search, date_filter, 
+                              status_filter, client_filter, worker_filter):
+        """Comprueba si un parte cumple los criterios de filtrado"""
+        # Búsqueda general
+        if search:
+            work_name = report['work_name'] or ''
+            client_name = report['client_name'] or ''
+            if search not in work_name.lower() and search not in client_name.lower():
+                return False
+                
+        # Filtro de fecha
+        if date_filter != 'Todos':
+            start_date = datetime.strptime(report['start_date'], '%Y-%m-%d')
+            today = datetime.today()
+            
+            if date_filter == 'Esta semana':
+                week_start = today - timedelta(days=today.weekday())
+                if start_date < week_start:
+                    return False
+            elif date_filter == 'Este mes':
+                month_start = today.replace(day=1)
+                if start_date < month_start:
+                    return False
+            elif date_filter == 'Último mes':
+                last_month = today.replace(day=1) - timedelta(days=1)
+                month_start = last_month.replace(day=1)
+                if not month_start <= start_date <= last_month:
+                    return False
+            elif date_filter == 'Este año':
+                year_start = today.replace(month=1, day=1)
+                if start_date < year_start:
+                    return False
+        
+        # Filtro de estado
+        if status_filter != 'Todos' and report['status'] != status_filter:
+            return False
+            
+        # Filtro de cliente
+        if client_filter:
+            client_name = report['client_name'] or ''
+            if client_filter not in client_name.lower():
+                return False
+                
+        # Filtro de trabajador
+        if worker_filter:
+            workers = [w.lower() for w in report['workers']] if report['workers'] else []
+            if not any(worker_filter in w for w in workers):
+                return False
+                
+        return True
+    
+    def new_report(self):
+        """Abre el diálogo para crear un nuevo parte de trabajo"""
+        dialog = Toplevel(self)
+        dialog.title("Nuevo Parte de Trabajo")
+        dialog.geometry("1200x800")
+        dialog.minsize(1200, 800)
+        
+        dialog.grab_set()  # Modal
+        
+        # Variables
+        name_var = StringVar()
+        client_var = StringVar()
+        start_date_var = StringVar()
+        end_date_var = StringVar()
+        quote_var = StringVar()
+        status_var = StringVar(value='En progreso')
+        
+        # Frame principal
+        main_container = ttk.Frame(dialog, padding=10)
+        main_container.pack(fill='both', expand=True)
+        
+        # Panel superior - Detalles del parte
+        top_frame = ttk.LabelFrame(main_container, text='Detalles del Parte', padding=10)
+        top_frame.pack(fill='x', pady=(0,10))
+        
+        # Primera fila
+        row1 = ttk.Frame(top_frame)
+        row1.pack(fill='x', pady=(0,10))
+        
+        # Nombre de la obra
+        name_frame = ttk.Frame(row1)
+        name_frame.pack(side='left', fill='x', expand=True, padx=(0,5))
+        ttk.Label(name_frame, text='Nombre de la Obra:').pack(anchor='w')
+        name_entry = ttk.Entry(name_frame, textvariable=name_var)
+        name_entry.pack(fill='x')
+        
+        # Cliente
+        client_frame = ttk.Frame(row1)
+        client_frame.pack(side='left', fill='x', expand=True, padx=5)
+        ttk.Label(client_frame, text='Cliente:').pack(anchor='w')
+        client_combo = create_clients_combobox(client_frame, client_var)
+        client_combo.pack(fill='x')
+        
+        # Segunda fila
+        row2 = ttk.Frame(top_frame)
+        row2.pack(fill='x', pady=(0,10))
+        
+        # Fecha inicial
+        start_date_frame = ttk.Frame(row2)
+        start_date_frame.pack(side='left', fill='x', expand=True, padx=(0,5))
+        ttk.Label(start_date_frame, text='Fecha Inicial:').pack(anchor='w')
+        start_date_entry = create_date_entry(start_date_frame, start_date_var)
+        start_date_entry.pack(fill='x')
+        
+        # Fecha final
+        end_date_frame = ttk.Frame(row2)
+        end_date_frame.pack(side='left', fill='x', expand=True, padx=5)
+        ttk.Label(end_date_frame, text='Fecha Final:').pack(anchor='w')
+        end_date_entry = create_date_entry(end_date_frame, end_date_var)
+        end_date_entry.pack(fill='x')
+        
+        # Tercera fila
+        row3 = ttk.Frame(top_frame)
+        row3.pack(fill='x')
+        
+        # Presupuesto
+        quote_frame = ttk.Frame(row3)
+        quote_frame.pack(side='left', fill='x', expand=True, padx=(0,5))
+        ttk.Label(quote_frame, text='Presupuesto:').pack(anchor='w')
+        quote_combo = create_quotes_combobox(quote_frame, quote_var)
+        quote_combo.pack(fill='x')
+        
+        # Estado
+        status_frame = ttk.Frame(row3)
+        status_frame.pack(side='left', fill='x', expand=True, padx=5)
+        ttk.Label(status_frame, text='Estado:').pack(anchor='w')
+        status_combo = ttk.Combobox(status_frame, textvariable=status_var, values=[
+            'En progreso', 'Completado', 'Facturado'
+        ], state='readonly')
+        status_combo.pack(fill='x')
+        
+        # Panel central - Matriz de trabajo
+        matrix_frame = ttk.LabelFrame(main_container, text='Asignación de Trabajo', padding=10)
+        matrix_frame.pack(fill='both', expand=True, pady=(0,10))
+        
+        # Panel inferior - Materiales
+        materials_frame = ttk.LabelFrame(main_container, text='Materiales', padding=10)
+        materials_frame.pack(fill='x', pady=(0,10))
+        
+        # Botones de acción
+        btn_frame = ttk.Frame(main_container)
+        btn_frame.pack(fill='x')
+        
+        # Botones lado izquierdo
+        left_btns = ttk.Frame(btn_frame)
+        left_btns.pack(side='left')
+        
+        create_styled_button(
+            left_btns,
+            '➕ Agregar Trabajador',
+            lambda: self.add_worker_to_matrix(),
+            'primary'
+        ).pack(side='left', padx=5)
+        
+        create_styled_button(
+            left_btns,
+            '🛠️ Agregar Material',
+            lambda: self.add_material_to_report(),
+            'primary'
+        ).pack(side='left', padx=5)
+        
+        # Botones lado derecho
+        right_btns = ttk.Frame(btn_frame)
+        right_btns.pack(side='right')
+        
+        create_styled_button(
+            right_btns,
+            'Guardar',
+            lambda: self.save_report(
+                dialog,
+                name_var.get(),
+                client_var.get(),
+                {
+                    'start': start_date_var.get(),
+                    'end': end_date_var.get()
+                },
+                quote_var.get(),
+                status_var.get()
+            ),
+            'success'
+        ).pack(side='right', padx=5)
+        
+        create_styled_button(
+            right_btns,
+            'Cancelar',
+            dialog.destroy,
+            'danger'
+        ).pack(side='right', padx=5)
+        
+        name_entry.focus()
+    
+    def edit_report(self):
+        """Edita el parte seleccionado"""
+        selection = self.tree.selection()
+        if not selection:
+            show_warning('Advertencia', 'Selecciona un parte', self)
+            return
+        
+        report_id = int(selection[0])
+        WorkReportEditor(self, report_id=report_id, on_save=lambda: self.refresh())
+    
+    def add_worker_to_matrix(self, matrix_frame=None, worker_id=None, days_data=None):
+        """Agrega una fila de trabajador a la matriz de asignación"""
+        # TODO: Implementar lógica de agregar trabajador
+        pass
+
+    def add_material_to_report(self, materials_frame=None, material_data=None):
+        """Agrega una fila de material a la tabla de materiales"""
+        # TODO: Implementar lógica de agregar material
+        pass
+
+    def create_work_matrix(self, frame, start_date, end_date, assignments=None):
+        """Crea la matriz de asignación de trabajo trabajador/día"""
+        # TODO: Implementar matriz de asignación
+        pass
+        
+    def update_report_status(self, report_id, new_status):
+        """Actualiza el estado de un parte de trabajo"""
+        try:
+            db.update_work_report_status(report_id, new_status)
+            self.refresh()
+            show_info('Éxito', 'Estado actualizado correctamente')
+        except Exception as e:
+            show_error('Error', f'No se pudo actualizar el estado: {str(e)}')
+
+    def export_excel(self):
+        """Exporta el parte seleccionado a Excel"""
+        # TODO: Implementar exportación a Excel
+        pass
+        
+    def delete_report(self):
+        """Elimina el parte seleccionado"""
+        selected = self.tree.selection()
+        if not selected:
+            show_warning('Selección requerida', 
+                        'Por favor selecciona un parte para eliminar')
+            return
+            
+        # Confirmar
+        if not ask_yes_no('Confirmar eliminación', 
+                         '¿Estás seguro de que quieres eliminar este parte?'):
+            return
+            
+        # Eliminar
+        report_id = self.tree.item(selected[0])['values'][0]
+        try:
+            db.delete_work_report(report_id)
+            self.refresh()
+            show_info('Éxito', 'Parte eliminado correctamente')
+        except Exception as e:
+            show_error('Error', f'No se pudo eliminar el parte: {str(e)}')
+    
+    def export_pdf(self):
+        """Exporta a PDF el parte seleccionado"""
+        show_info('Info', 'La exportación a PDF está en desarrollo', self)
+
+
+class WorkReportEditor(tk.Toplevel):
+    """Editor de partes de obra"""
+    
+    def __init__(self, parent, report_id=None, quote_id=None, on_save=None):
+        super().__init__(parent)
+        self.report_id = report_id
+        self.quote_id = quote_id
+        self.on_save = on_save
+        
+        self.title('Parte Diario de Trabajo')
+        self.geometry('800x900')
+        center_window(self, 800, 900)
+        
+        self._setup_ui()
+        self._load_data()
+        
+        # Modal
+        self.transient(parent)
+        self.grab_set()
+    
+    def _setup_ui(self):
+        """Configura la interfaz"""
+        # Panel principal con scroll
+        canvas = tk.Canvas(self)
+        scrollbar = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        self.main_container = ttk.Frame(canvas)
+        
+        # Configurar scroll
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=self.main_container, anchor="nw", width=780)
+        
+        # Pack del scroll
+        canvas.pack(side="left", fill="both", expand=True, padx=10)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Título principal
+        title_frame = ttk.Frame(self.main_container)
+        title_frame.pack(fill='x', pady=10)
+        ttk.Label(title_frame, text='PARTE DIARIO DE TRABAJO', 
+                 font=('Helvetica', 14, 'bold')).pack()
+        
+        # Información básica
+        info_frame = ttk.Frame(self.main_container)
+        info_frame.pack(fill='x', pady=5)
+        
+        # Curso/Grupo (Obra)
+        ttk.Label(info_frame, text='CURSO/GRUPO:', font=('Helvetica', 10, 'bold')).grid(
+            row=0, column=0, sticky='w', padx=5)
+        self.work_name_entry = ttk.Entry(info_frame, width=40)
+        self.work_name_entry.grid(row=0, column=1, sticky='w', padx=5)
+        
+        # Fecha
+        ttk.Label(info_frame, text='FECHA:', font=('Helvetica', 10, 'bold')).grid(
+            row=0, column=2, sticky='w', padx=5)
+        self.date_entry = ttk.Entry(info_frame, width=20)
+        self.date_entry.grid(row=0, column=3, sticky='w', padx=5)
+        self.date_entry.insert(0, datetime.today().strftime('%d/%m/%Y'))
+        
+        # Cliente (oculto pero guardado)
+        self.client_entry = ttk.Entry(self.main_container)
+        self.client_entry.pack_forget()  # Lo ocultamos
+        
+        # Trabajo realizado
+        work_frame = ttk.LabelFrame(self.main_container, text='TRABAJO REALIZADO')
+        work_frame.pack(fill='x', pady=10, padx=5)
+        self.work_text = tk.Text(work_frame, height=5)
+        self.work_text.pack(fill='x', padx=5, pady=5)
+        
+        # Reparto de tareas
+        tasks_frame = ttk.LabelFrame(self.main_container, text='REPARTO DE TAREAS')
+        tasks_frame.pack(fill='x', pady=10, padx=5)
+        
+        # Cabecera de tareas
+        ttk.Label(tasks_frame, text='Miembro del grupo').grid(row=0, column=0, padx=5, pady=5)
+        ttk.Label(tasks_frame, text='Tarea realizada').grid(row=0, column=1, padx=5, pady=5)
+        
+        # 6 filas de tareas
+        self.task_entries = []
+        for i in range(6):
+            member_entry = ttk.Entry(tasks_frame, width=30)
+            member_entry.grid(row=i+1, column=0, padx=5, pady=2)
+            
+            task_entry = ttk.Entry(tasks_frame, width=50)
+            task_entry.grid(row=i+1, column=1, padx=5, pady=2)
+            
+            self.task_entries.append((member_entry, task_entry))
+        
+        # Herramientas utilizadas
+        tools_frame = ttk.LabelFrame(self.main_container, text='HERRAMIENTAS UTILIZADAS')
+        tools_frame.pack(fill='x', pady=10, padx=5)
+        self.tools_text = tk.Text(tools_frame, height=3)
+        self.tools_text.pack(fill='x', padx=5, pady=5)
+        
+        # Materiales utilizados
+        materials_frame = ttk.LabelFrame(self.main_container, text='MATERIALES UTILIZADOS')
+        materials_frame.pack(fill='x', pady=10, padx=5)
+        self.materials_text = tk.Text(materials_frame, height=3)
+        self.materials_text.pack(fill='x', padx=5, pady=5)
+        
+        # Tabla de horas por trabajador/fecha
+        hours_frame = ttk.LabelFrame(main_container, text='Horas de Trabajo', padding=10)
+        hours_frame.pack(fill='both', expand=True, padx=10, pady=(0, 10))
+        
+        self._create_hours_section(hours_frame)
+        
+        # Materiales
+        materials_frame = ttk.LabelFrame(main_container, text='Materiales', padding=10)
+        materials_frame.pack(fill='both', expand=True, padx=10, pady=(0, 10))
+        
+        self._create_materials_section(materials_frame)
+        
+        # Botones inferiores
+        btn_frame = ttk.Frame(main_container)
+        btn_frame.pack(fill='x', padx=10, pady=10)
+        
+        create_styled_button(
+            btn_frame, 'Cancelar', self.destroy, 'secondary'
+        ).pack(side='left', padx=5)
+        
+        create_styled_button(
+            btn_frame, '💾 Guardar Parte', self._save, 'success'
+        ).pack(side='right', padx=5)
+    
+    def _create_hours_section(self, parent):
+        """Crea la sección de horas"""
+        # Botones de acción
+        btn_frame = ttk.Frame(parent)
+        btn_frame.pack(fill='x', pady=(0, 10))
+        
+        create_styled_button(
+            btn_frame, '+ Añadir Fecha', self._add_date_column, 'success'
+        ).pack(side='left', padx=5)
+        
+        create_styled_button(
+            btn_frame, '+ Añadir Trabajador', self._add_worker_row, 'primary'
+        ).pack(side='left', padx=5)
+        
+        # Contenedor con scroll para la tabla
+        canvas_container = ttk.Frame(parent)
+        canvas_container.pack(fill='both', expand=True)
+        
+        canvas = tk.Canvas(canvas_container, height=300)
+        scrollbar_x = ttk.Scrollbar(canvas_container, orient='horizontal', command=canvas.xview)
+        scrollbar_y = ttk.Scrollbar(canvas_container, orient='vertical', command=canvas.yview)
+        
+        self.hours_table_frame = ttk.Frame(canvas)
+        
+        canvas.create_window((0, 0), window=self.hours_table_frame, anchor='nw')
+        canvas.configure(xscrollcommand=scrollbar_x.set, yscrollcommand=scrollbar_y.set)
+        
+        canvas.pack(side='left', fill='both', expand=True)
+        scrollbar_y.pack(side='right', fill='y')
+        scrollbar_x.pack(side='bottom', fill='x')
+        
+        self.hours_canvas = canvas
+        
+        # Inicializar estructura de datos
+        self.dates = []  # Lista de fechas (strings)
+        self.workers_hours = {}  # {worker_id: {date: hours}}
+        
+        # Bind para actualizar scroll region
+        self.hours_table_frame.bind('<Configure>', 
+                                  lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        
+        self._render_hours_table()
+    
+    def _create_materials_section(self, parent):
+        """Crea la sección de materiales con selector como en presupuestos"""
+        # Dividir en dos partes: búsqueda/lista y tabla de añadidos
+        left_frame = ttk.Frame(parent)
+        left_frame.pack(side='left', fill='both', expand=True, padx=(0, 5))
+        
+        right_frame = ttk.Frame(parent)
+        right_frame.pack(side='right', fill='both', expand=True, padx=(5, 0))
+        
+        # Panel izquierdo: Búsqueda y lista de materiales
+        ttk.Label(left_frame, text='Buscar material:', font=('Helvetica', 9, 'bold')).pack(anchor='w')
+        
+        self.mat_search_var = tk.StringVar()
+        self.mat_search_var.trace('w', lambda *args: self._filter_materials_list())
+        search_entry = ttk.Entry(left_frame, textvariable=self.mat_search_var)
+        search_entry.pack(fill='x', pady=(5, 10))
+        
+        results_frame = ttk.Frame(left_frame)
+        results_frame.pack(fill='both', expand=True)
+        
+        scrollbar = ttk.Scrollbar(results_frame)
+        scrollbar.pack(side='right', fill='y')
+        
+        self.mat_listbox = tk.Listbox(
+            results_frame, height=8, yscrollcommand=scrollbar.set,
+            font=('Helvetica', 9), relief='solid', borderwidth=1
+        )
+        self.mat_listbox.pack(fill='both', expand=True)
+        scrollbar.config(command=self.mat_listbox.yview)
+        
+        # Doble click para añadir
+        self.mat_listbox.bind('<Double-Button-1>', lambda e: self._add_selected_material())
+        
+        # Botón añadir
+        create_styled_button(
+            left_frame, '+ Añadir Seleccionado', self._add_selected_material, 'success'
+        ).pack(fill='x', pady=(10, 0))
+        
+        # Cargar materiales
+        self.materials_list = db.list_materials()
+        self.filtered_materials = []
+        self._filter_materials_list()
+        
+        # Panel derecho: Materiales añadidos
+        ttk.Label(right_frame, text='Materiales añadidos:', font=('Helvetica', 9, 'bold')).pack(anchor='w')
+        
+        # Botón quitar
+        create_styled_button(
+            right_frame, '🗑️ Quitar Seleccionado', self._remove_material, 'danger'
+        ).pack(fill='x', pady=(5, 10))
+        
+        # Tabla de materiales añadidos
+        columns = ('name', 'quantity')
+        self.materials_tree = ttk.Treeview(right_frame, columns=columns, show='headings', height=8)
+        
+        self.materials_tree.heading('name', text='Material', anchor='w')
+        self.materials_tree.heading('quantity', text='Cantidad', anchor='center')
+        
+        self.materials_tree.column('name', width=300, anchor='w')
+        self.materials_tree.column('quantity', width=100, anchor='center')
+        
+        # Doble click para editar cantidad
+        self.materials_tree.bind('<Double-Button-1>', lambda e: self._edit_material_quantity())
+        
+        scrollbar = ttk.Scrollbar(right_frame, orient='vertical', command=self.materials_tree.yview)
+        self.materials_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.materials_tree.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+        
+        self.materials_data = []  # Lista de {material_id, name, quantity}
+    
+    def _filter_materials_list(self):
+        """Filtra la lista de materiales"""
+        self.mat_listbox.delete(0, tk.END)
+        self.filtered_materials = []
+        
+        query = self.mat_search_var.get().lower().strip()
+        
+        if not query:
+            # Mostrar por categorías
+            materials_by_cat = {}
+            for material in self.materials_list:
+                category = material['category'] or 'Sin categoría'
+                if category not in materials_by_cat:
+                    materials_by_cat[category] = []
+                materials_by_cat[category].append(material)
+            
+            for category in sorted(materials_by_cat.keys()):
+                self.mat_listbox.insert(tk.END, f"━━ {category} ━━")
+                self.filtered_materials.append(None)  # Separador
+                
+                for material in sorted(materials_by_cat[category], key=lambda x: x['name']):
+                    display = f"  {material['name']}"
+                    self.mat_listbox.insert(tk.END, display)
+                    self.filtered_materials.append(material)
+        else:
+            # Búsqueda
+            for material in self.materials_list:
+                if query in material['name'].lower():
+                    category = material['category'] or 'Sin categoría'
+                    display = f"{material['name']} [{category}]"
+                    self.mat_listbox.insert(tk.END, display)
+                    self.filtered_materials.append(material)
+    
+    def _add_selected_material(self):
+        """Añade el material seleccionado"""
+        selection = self.mat_listbox.curselection()
+        if not selection:
+            return
+        
+        idx = selection[0]
+        material = self.filtered_materials[idx]
+        
+        if material is None:  # Es un separador
+            return
+        
+        # Pedir cantidad
+        quantity = simpledialog.askfloat('Cantidad', f'Cantidad de {material["name"]}:', 
+                                       initialvalue=1.0)
+        if quantity is None or quantity <= 0:
+            return
+        
+        self.materials_data.append({
+            'material_id': material['id'],
+            'name': material['name'],
+            'quantity': quantity
+        })
+        self._refresh_materials()
+    
+    def _remove_material(self):
+        """Elimina el material seleccionado"""
+        selection = self.materials_tree.selection()
+        if not selection:
+            return
+        
+        idx = int(selection[0])
+        if 0 <= idx < len(self.materials_data):
+            del self.materials_data[idx]
+            self._refresh_materials()
+    
+    def _edit_material_quantity(self):
+        """Edita la cantidad de un material"""
+        selection = self.materials_tree.selection()
+        if not selection:
+            return
+        
+        idx = int(selection[0])
+        material = self.materials_data[idx]
+        
+        new_quantity = simpledialog.askfloat('Editar Cantidad', 
+                                          f'Nueva cantidad de {material["name"]}:',
+                                          initialvalue=material['quantity'])
+        if new_quantity and new_quantity > 0:
+            self.materials_data[idx]['quantity'] = new_quantity
+            self._refresh_materials()
+    
+    def _refresh_materials(self):
+        """Actualiza la tabla de materiales"""
+        self.materials_tree.delete(*self.materials_tree.get_children())
+        
+        for idx, mat in enumerate(self.materials_data):
+            self.materials_tree.insert('', 'end', iid=str(idx), values=(
+                mat['name'],
+                mat['quantity']
+            ))
+    
+    def _render_hours_table(self):
+        """Renderiza la tabla de horas"""
+        # Limpiar tabla
+        for widget in self.hours_table_frame.winfo_children():
+            widget.destroy()
+        
+        # Si no hay fechas o trabajadores, mostrar mensaje
+        if not self.dates and not self.workers_hours:
+            ttk.Label(self.hours_table_frame, text='Sin datos. Añade fechas y trabajadores.').pack()
+            return
+        
+        # Ordenar fechas y obtener lista de trabajadores
+        self.dates.sort()
+        workers = sorted(self.workers_hours.keys())
+        
+        # Crear header con fechas
+        ttk.Label(self.hours_table_frame, text='Trabajador', width=30).grid(
+            row=0, column=0, sticky='ew', padx=5, pady=5
+        )
+        
+        for col, date in enumerate(self.dates, start=1):
+            ttk.Label(self.hours_table_frame, text=date).grid(
+                row=0, column=col, sticky='ew', padx=5, pady=5
+            )
+        
+        # Añadir filas de trabajadores
+        for row, worker_id in enumerate(workers, start=1):
+            worker = db.get_worker(worker_id)
+            if not worker:
+                continue
+            
+            worker_name = worker['name']
+            ttk.Label(self.hours_table_frame, text=worker_name).grid(
+                row=row, column=0, sticky='w', padx=5, pady=5
+            )
+            
+            # Celdas de horas
+            for col, date in enumerate(self.dates, start=1):
+                hours = self.workers_hours.get(worker_id, {}).get(date, 0)
+                cell = ttk.Entry(self.hours_table_frame, width=5)
+                cell.insert(0, str(hours))
+                cell.grid(row=row, column=col, padx=5, pady=5)
+                
+                # Bind para actualizar horas al cambiar
+                cell.bind('<FocusOut>', lambda e, w=worker_id, d=date, c=cell:
+                         self._update_hours(w, d, c))
+                cell.bind('<Return>', lambda e, w=worker_id, d=date, c=cell:
+                         self._update_hours(w, d, c))
+    
+    def _update_hours(self, worker_id, date, cell):
+        """Actualiza las horas de un trabajador en una fecha"""
+        try:
+            hours = float(cell.get())
+            if hours < 0:
+                raise ValueError
+        except ValueError:
+            cell.delete(0, tk.END)
+            cell.insert(0, '0')
+            hours = 0
+        
+        if worker_id not in self.workers_hours:
+            self.workers_hours[worker_id] = {}
+        self.workers_hours[worker_id][date] = hours
+    
+    def _add_date_column(self):
+        """Añade una nueva fecha"""
+        # Seleccionar fecha (podríamos usar un calendar widget mejor)
+        new_date = datetime.today().strftime('%Y-%m-%d')
+        
+        if new_date in self.dates:
+            show_warning('Advertencia', 'Esta fecha ya está añadida', self)
+            return
+        
+        self.dates.append(new_date)
+        self._render_hours_table()
+    
+    def _add_worker_row(self):
+        """Añade un nuevo trabajador"""
+        # Mostrar diálogo de selección de trabajador
+        workers = db.list_workers()
+        
+        # Filtrar trabajadores ya añadidos
+        available_workers = [w for w in workers if w['id'] not in self.workers_hours]
+        
+        if not available_workers:
+            show_warning('Advertencia', 'No hay más trabajadores disponibles', self)
+            return
+        
+        # Crear ventana de selección
+        dialog = tk.Toplevel(self)
+        dialog.title('Seleccionar Trabajador')
+        dialog.geometry('300x400')
+        center_window(dialog, 300, 400)
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        # Lista de trabajadores
+        frame = ttk.Frame(dialog, padding=10)
+        frame.pack(fill='both', expand=True)
+        
+        scrollbar = ttk.Scrollbar(frame)
+        scrollbar.pack(side='right', fill='y')
+        
+        listbox = tk.Listbox(frame, yscrollcommand=scrollbar.set)
+        listbox.pack(fill='both', expand=True, pady=(0, 10))
+        scrollbar.config(command=listbox.yview)
+        
+        for worker in available_workers:
+            listbox.insert(tk.END, worker['name'])
+        
+        def on_select():
+            selection = listbox.curselection()
+            if not selection:
+                return
+            
+            worker = available_workers[selection[0]]
+            self.workers_hours[worker['id']] = {}
+            self._render_hours_table()
+            dialog.destroy()
+        
+        ttk.Button(frame, text='Seleccionar', command=on_select).pack(side='right', padx=5)
+        ttk.Button(frame, text='Cancelar', command=dialog.destroy).pack(side='right')
+    
+    def _load_data(self):
+        """Carga datos del parte si se está editando o datos del presupuesto si es nuevo"""
+        # Inicializar/limpiar datos
+        self.materials_data = []
+        self.dates = []
+        self.workers_hours = {}
+
+        if self.report_id:
+            # Cargar datos del parte existente
+            report = db.get_work_report(self.report_id)
+            if not report:
+                return
+            
+            # Datos básicos
+            self.work_name_entry.insert(0, report['work_name'])
+            self.client_entry.insert(0, report['client_name'] or '')
+            
+            # Cargar horas
+            hours = db.list_work_hours(self.report_id)
+            for hour in hours:
+                date = hour['date']
+                if date not in self.dates:
+                    self.dates.append(date)
+                
+                worker_id = hour['worker_id']
+                if worker_id not in self.workers_hours:
+                    self.workers_hours[worker_id] = {}
+                self.workers_hours[worker_id][date] = hour['hours']
+            
+            # Cargar materiales
+            materials = db.list_work_materials(self.report_id)
+            for mat in materials:
+                self.materials_data.append({
+                    'material_id': mat['material_id'],
+                    'name': mat['name'],
+                    'quantity': mat['quantity']
+                })
+        
+        elif self.quote_id:
+            # Cargar datos del presupuesto
+            quote, quote_items = db.get_quote(self.quote_id)
+            if not quote:
+                return
+            
+            # Datos básicos
+            self.work_name_entry.insert(0, quote['work_name'])
+            self.client_entry.insert(0, quote['client_name'] or '')
+            
+            # Cargar materiales del presupuesto
+            for item in quote_items:
+                self.materials_data.append({
+                    'material_id': item['material_id'],
+                    'name': item['name'],
+                    'quantity': item['quantity']
+                })
+        
+        # Actualizar las vistas
+        self._render_hours_table()
+        self._refresh_materials()
+    
+    def _save(self):
+        """Guarda el parte"""
+        work_name = self.work_name_entry.get().strip()
+        if not work_name:
+            show_error('Error', 'El nombre de obra es obligatorio', self)
+            return
+        
+        client_name = self.client_entry.get().strip()
+        date = self.date_entry.get().strip()
+        work_done = self.work_text.get('1.0', 'end-1c').strip()
+        tools_used = self.tools_text.get('1.0', 'end-1c').strip()
+        materials_used = self.materials_text.get('1.0', 'end-1c').strip()
+        
+        # Recopilar tareas
+        tasks = []
+        for member_entry, task_entry in self.task_entries:
+            member = member_entry.get().strip()
+            task = task_entry.get().strip()
+            if member or task:  # Solo guardar si hay algo
+                tasks.append({
+                    'member': member,
+                    'task': task
+                })
+        
+        try:
+            if self.report_id:
+                # Actualizar parte existente
+                db.update_work_report(
+                    self.report_id, 
+                    work_name, 
+                    client_name,
+                    date=date,
+                    work_done=work_done,
+                    tools_used=tools_used,
+                    materials_used=materials_used,
+                    tasks=tasks
+                )
+                report_id = self.report_id
+            else:
+                # Crear nuevo parte
+                report_id = db.add_work_report(
+                    self.quote_id,
+                    work_name,
+                    client_name,
+                    date=date,
+                    work_done=work_done,
+                    tools_used=tools_used,
+                    materials_used=materials_used,
+                    tasks=tasks
+                )
+            
+            show_info('Éxito', 'Parte guardado correctamente', self)
+            
+            if self.on_save:
+                self.on_save()
+            
+            self.destroy()
+            
+            # Generar PDF automáticamente
+            self.generate_pdf(report_id)
+            
+        except Exception as e:
+            show_error('Error', f'Error al guardar: {e}', self)
+    
+    def generate_pdf(self, report_id):
+        """Genera el PDF del parte de trabajo"""
+        try:
+            from reportlab.lib import colors
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+            from reportlab.lib.units import inch
+            
+            # Obtener datos del parte
+            report = db.get_work_report(report_id)
+            if not report:
+                return
+            
+            # Crear PDF
+            filename = f"parte_trabajo_{report_id}.pdf"
+            doc = SimpleDocTemplate(filename, pagesize=A4)
+            
+            # Estilos
+            styles = getSampleStyleSheet()
+            title_style = styles['Heading1']
+            normal_style = styles['Normal']
+            
+            # Elementos del documento
+            elements = []
+            
+            # Título
+            elements.append(Paragraph('PARTE DIARIO DE TRABAJO', title_style))
+            elements.append(Spacer(1, 20))
+            
+            # Datos básicos
+            data = [
+                ['CURSO/GRUPO:', report['work_name'], 'FECHA:', report['date']],
+            ]
+            t = Table(data, colWidths=[100, 200, 60, 100])
+            t.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+                ('BACKGROUND', (2, 0), (2, -1), colors.lightgrey),
+            ]))
+            elements.append(t)
+            elements.append(Spacer(1, 20))
+            
+            # Trabajo realizado
+            elements.append(Paragraph('TRABAJO REALIZADO', styles['Heading2']))
+            elements.append(Paragraph(report['work_done'] or '', normal_style))
+            elements.append(Spacer(1, 20))
+            
+            # Reparto de tareas
+            elements.append(Paragraph('REPARTO DE TAREAS', styles['Heading2']))
+            task_data = [['Miembro del grupo', 'Tarea realizada']]
+            for task in report['tasks']:
+                task_data.append([task['member'], task['task']])
+            
+            t = Table(task_data, colWidths=[200, 300])
+            t.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ]))
+            elements.append(t)
+            elements.append(Spacer(1, 20))
+            
+            # Herramientas utilizadas
+            elements.append(Paragraph('HERRAMIENTAS UTILIZADAS', styles['Heading2']))
+            elements.append(Paragraph(report['tools_used'] or '', normal_style))
+            elements.append(Spacer(1, 20))
+            
+            # Materiales utilizados
+            elements.append(Paragraph('MATERIALES UTILIZADOS', styles['Heading2']))
+            elements.append(Paragraph(report['materials_used'] or '', normal_style))
+            
+            # Generar PDF
+            doc.build(elements)
+            show_info('Éxito', f'PDF generado: {filename}', self.winfo_toplevel())
+            
+        except Exception as e:
+            show_error('Error', f'Error al generar PDF: {e}', self.winfo_toplevel())
