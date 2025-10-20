@@ -103,6 +103,38 @@ class DocumentViewer(QDialog):
         """Carga el contenido HTML en el visor"""
         self.web_view.setHtml(self.html_content)
 
+        # Si es editable, habilitar modo edición automáticamente tras cargar
+        if self.editable:
+            # Esperar a que se cargue el contenido
+            self.web_view.loadFinished.connect(self.enable_editing_on_load)
+
+    def enable_editing_on_load(self):
+        """Habilita la edición automáticamente después de cargar"""
+        script = """
+            // Hacer todos los elementos con clase 'editable' editables
+            var editables = document.querySelectorAll('.editable');
+            editables.forEach(function(el) {
+                el.contentEditable = true;
+                el.style.outline = '1px dashed #ccc';
+                el.style.minHeight = '20px';
+                el.addEventListener('focus', function() {
+                    this.style.outline = '2px solid #3498db';
+                });
+                el.addEventListener('blur', function() {
+                    this.style.outline = '1px dashed #ccc';
+                });
+            });
+
+            // Si no hay elementos editables, hacer todo el body editable
+            if (editables.length === 0) {
+                document.body.contentEditable = true;
+                document.body.style.outline = '2px dashed #3498db';
+            }
+        """
+        self.web_view.page().runJavaScript(script)
+        if hasattr(self, 'save_changes_button'):
+            self.save_changes_button.setEnabled(True)
+
     def toggle_edit_mode(self, enabled):
         """Habilita o deshabilita el modo de edición"""
         if enabled:

@@ -660,12 +660,12 @@ class QuoteEditor(QDialog):
             engine = TemplateEngine()
             html_content = engine.render_quote(presupuesto_temp)
 
-            # Mostrar en visor
+            # Mostrar en visor editable
             viewer = DocumentViewer(
                 self,
                 html_content,
                 f"Vista Previa - Presupuesto {presupuesto_temp.numero}",
-                editable=False
+                editable=True
             )
             viewer.exec()
 

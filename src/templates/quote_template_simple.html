@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Presupuesto</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            padding: 40px 60px;
+            background: white;
+            color: #000;
+            line-height: 1.8;
+            font-size: 13px;
+        }
+
+        .client-info {
+            text-align: right;
+            margin-bottom: 40px;
+        }
+
+        .client-info div {
+            margin: 2px 0;
+        }
+
+        .date {
+            margin-bottom: 30px;
+        }
+
+        .greeting {
+            margin-bottom: 20px;
+        }
+
+        .intro {
+            margin-bottom: 30px;
+            text-align: justify;
+        }
+
+        .section-title {
+            font-weight: bold;
+            margin: 20px 0 10px 0;
+            text-transform: uppercase;
+        }
+
+        .materials-list {
+            margin: 20px 0 20px 20px;
+        }
+
+        .materials-list div {
+            margin: 3px 0;
+        }
+
+        .total-section {
+            margin: 30px 0;
+            text-align: justify;
+        }
+
+        .total-amount {
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .conditions {
+            margin: 30px 0;
+        }
+
+        .conditions p {
+            margin: 8px 0;
+            text-align: justify;
+        }
+
+        .signatures {
+            margin-top: 80px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .signature-box {
+            text-align: center;
+            width: 40%;
+        }
+
+        .signature-line {
+            border-bottom: 1px solid #000;
+            margin-bottom: 5px;
+            height: 60px;
+        }
+
+        .company-name {
+            font-weight: bold;
+        }
+
+        .editable {
+            min-height: 20px;
+            padding: 2px;
+        }
+
+        @media print {
+            body {
+                padding: 20px 40px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="client-info">
+        <div class="editable">{{ cliente_nombre }}</div>
+        <div class="editable">{{ cliente_direccion }}</div>
+        <div class="editable">{{ cliente_nif }}</div>
+    </div>
+
+    <div class="date editable">
+        Fecha: {{ fecha }}
+    </div>
+
+    <div class="greeting editable">
+        Muy Sr. Nuestro:
+    </div>
+
+    <div class="intro editable">
+        A continuación, detallamos desglose de presupuesto aproximado de trabajos a realizar en sus instalaciones
+    </div>
+
+    <div class="section-title">MATERIALES</div>
+
+    <div class="materials-list">
+        {% for linea in lineas %}
+        <div class="editable">{{ linea.material_nombre }} x {{ linea.cantidad_simple }}</div>
+        {% endfor %}
+    </div>
+
+    <div class="total-section editable">
+        El total de los trabajos presupuestados, incluyendo mano de obra, materiales, asciende a la cantidad de
+        <span class="total-amount">{{ total_final }}</span>
+    </div>
+
+    <div class="conditions">
+        <p class="editable"><strong>EL IVA SE INCREMENTARÁ EN LA FACTURA CORRESPONDIENTE</strong></p>
+
+        <p class="editable">
+            LOS TRABAJOS NO PRESUPUESTADOS SE COBRARÍAN A 25€/HORA O SE PRESUPUESTARÍA EN CASO DE OBRA MAYOR
+        </p>
+
+        <p class="editable">
+            ESTE PRESUPUESTO TIENE UNA VALIDEZ DE 15 DÍAS
+        </p>
+
+        <p class="editable">
+            No se incluyen los permisos ni licencias que sean necesarios, los cuales se deberá contar con ellos al comienzo de los trabajos. No se incluyen proyectos o memorias técnicas si fueran necesarios.
+        </p>
+    </div>
+
+    <div class="signatures">
+        <div class="signature-box">
+            <div class="signature-line"></div>
+            <div class="company-name editable">BARAJAS PEÑA S.L.</div>
+            <div class="editable">FIRMA DEL CONSTRUCTOR:</div>
+        </div>
+
+        <div class="signature-box">
+            <div class="signature-line"></div>
+            <div class="editable">{{ cliente_nombre }}</div>
+            <div class="editable">FIRMA DEL PROMOTOR:</div>
+        </div>
+    </div>
+</body>
+</html>

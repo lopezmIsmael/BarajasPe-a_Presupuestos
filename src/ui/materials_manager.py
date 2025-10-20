@@ -217,6 +217,8 @@ class MaterialsManager(QWidget):
     """Widget para gestionar materiales"""
 
     material_selected = pyqtSignal(object)  # Señal cuando se selecciona un material
+    material_updated = pyqtSignal(object)   # Señal cuando se actualiza un material
+    material_created = pyqtSignal(object)   # Señal cuando se crea un material
 
     def __init__(self, db: Database, parent=None):
         super().__init__(parent)
@@ -316,8 +318,10 @@ class MaterialsManager(QWidget):
         """Crea un nuevo material"""
         dialog = MaterialDialog(self, db=self.db)
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            material = dialog.get_material()
             show_info(self, "Éxito", "Material creado correctamente")
             self.load_materials()
+            self.material_created.emit(material)  # Emitir señal
 
     def edit_material(self):
         """Edita el material seleccionado"""
@@ -334,8 +338,10 @@ class MaterialsManager(QWidget):
 
         dialog = MaterialDialog(self, material=material, db=self.db)
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            material_updated = dialog.get_material()
             show_info(self, "Éxito", "Material actualizado correctamente")
             self.load_materials()
+            self.material_updated.emit(material_updated)  # Emitir señal
 
     def delete_material(self):
         """Elimina el material seleccionado"""

@@ -19,17 +19,19 @@ class TemplateEngine:
         self.env.filters['currency'] = format_currency
         self.env.filters['date'] = format_date
 
-    def render_quote(self, presupuesto):
+    def render_quote(self, presupuesto, simple=True):
         """
         Renderiza un presupuesto a HTML.
 
         Args:
             presupuesto: Objeto Presupuesto
+            simple: Si True, usa plantilla simple tipo carta
 
         Returns:
             String con HTML renderizado
         """
-        template = self.env.get_template('quote_template.html')
+        template_name = 'quote_template_simple.html' if simple else 'quote_template.html'
+        template = self.env.get_template(template_name)
 
         # Preparar datos
         lineas_data = []
@@ -38,6 +40,7 @@ class TemplateEngine:
                 'material_nombre': linea.material.nombre,
                 'descripcion_personalizada': linea.descripcion_personalizada,
                 'cantidad': f"{linea.cantidad:.2f}",
+                'cantidad_simple': f"{linea.cantidad:.1f}",  # Para plantilla simple
                 'unidad': linea.material.unidad,
                 'precio_venta_unitario': format_currency(linea.precio_venta_unitario),
                 'precio_venta_total': format_currency(linea.precio_venta_total)

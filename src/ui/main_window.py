@@ -140,6 +140,18 @@ class MainWindow(QMainWindow):
             lambda w: self.status_bar.showMessage(f"Trabajador seleccionado: {w}")
         )
 
+        # Conectar señales de actualización de materiales
+        self.materials_tab.material_created.connect(self.on_material_changed)
+        self.materials_tab.material_updated.connect(self.on_material_changed)
+
+    def on_material_changed(self, material):
+        """Maneja cuando se crea o actualiza un material"""
+        self.status_bar.showMessage(f"Material actualizado: {material.nombre} - Actualizando vistas...")
+        # Recargar presupuestos para reflejar cambios
+        self.quotes_tab.load_quotes()
+        # Recargar partes de trabajo
+        self.reports_tab.load_reports()
+
     def new_quote(self):
         """Crea un nuevo presupuesto"""
         self.tabs.setCurrentIndex(0)
