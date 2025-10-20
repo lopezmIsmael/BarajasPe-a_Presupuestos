@@ -114,20 +114,22 @@ class DocumentViewer(QDialog):
             var editables = document.querySelectorAll('.editable');
             editables.forEach(function(el) {
                 el.contentEditable = true;
-                el.style.outline = '1px dashed #ccc';
                 el.style.minHeight = '20px';
+                // Resaltar solo cuando se hace focus
                 el.addEventListener('focus', function() {
+                    this.style.backgroundColor = '#f0f8ff';
                     this.style.outline = '2px solid #3498db';
                 });
                 el.addEventListener('blur', function() {
-                    this.style.outline = '1px dashed #ccc';
+                    this.style.backgroundColor = 'transparent';
+                    this.style.outline = 'none';
                 });
             });
 
             // Si no hay elementos editables, hacer todo el body editable
             if (editables.length === 0) {
                 document.body.contentEditable = true;
-                document.body.style.outline = '2px dashed #3498db';
+                document.body.style.outline = 'none';
             }
         """
         self.web_view.page().runJavaScript(script)
@@ -140,7 +142,14 @@ class DocumentViewer(QDialog):
             # Hacer el contenido editable usando JavaScript
             script = """
                 document.body.contentEditable = true;
-                document.body.style.outline = '2px dashed #3498db';
+                document.body.style.outline = 'none';
+                // Añadir indicador visual sutil solo al hacer focus
+                document.body.addEventListener('focus', function() {
+                    this.style.backgroundColor = '#f0f8ff';
+                }, true);
+                document.body.addEventListener('blur', function() {
+                    this.style.backgroundColor = 'transparent';
+                }, true);
             """
             self.web_view.page().runJavaScript(script)
             self.save_changes_button.setEnabled(True)
@@ -156,6 +165,7 @@ class DocumentViewer(QDialog):
             script = """
                 document.body.contentEditable = false;
                 document.body.style.outline = 'none';
+                document.body.style.backgroundColor = 'transparent';
             """
             self.web_view.page().runJavaScript(script)
             self.save_changes_button.setEnabled(False)
