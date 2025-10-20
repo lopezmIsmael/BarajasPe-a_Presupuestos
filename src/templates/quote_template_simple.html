@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Presupuesto</title>
+    <title>Presupuesto - {{ numero }}</title>
     <style>
         * {
             margin: 0;
@@ -12,40 +12,48 @@
         }
 
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             padding: 40px 60px;
             background: white;
-            color: #000;
-            line-height: 1.8;
+            color: #333;
+            line-height: 1.6;
             font-size: 13px;
         }
 
         .client-info {
             text-align: right;
             margin-bottom: 40px;
+            border-bottom: 2px solid #2c3e50;
+            padding-bottom: 15px;
         }
 
         .client-info div {
-            margin: 2px 0;
+            margin: 4px 0;
         }
 
         .date {
             margin-bottom: 30px;
+            color: #555;
         }
 
         .greeting {
             margin-bottom: 20px;
+            font-weight: 500;
         }
 
         .intro {
             margin-bottom: 30px;
             text-align: justify;
+            line-height: 1.8;
         }
 
         .section-title {
             font-weight: bold;
-            margin: 20px 0 10px 0;
+            margin: 25px 0 15px 0;
             text-transform: uppercase;
+            background: #f8f9fa;
+            padding: 8px 15px;
+            border-left: 4px solid #3498db;
         }
 
         .materials-list {
@@ -53,47 +61,68 @@
         }
 
         .materials-list div {
-            margin: 3px 0;
+            margin: 5px 0;
+            padding: 3px 0;
         }
 
         .total-section {
             margin: 30px 0;
             text-align: justify;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
         }
 
         .total-amount {
             font-weight: bold;
-            font-size: 14px;
+            font-size: 16px;
+            color: #2c3e50;
         }
 
         .conditions {
             margin: 30px 0;
+            background: #fffbf0;
+            padding: 20px;
+            border-left: 4px solid #f39c12;
         }
 
         .conditions p {
-            margin: 8px 0;
+            margin: 10px 0;
             text-align: justify;
+            line-height: 1.6;
+        }
+
+        .conditions strong {
+            color: #c0392b;
         }
 
         .signatures {
             margin-top: 80px;
             display: flex;
             justify-content: space-between;
+            gap: 40px;
         }
 
         .signature-box {
             text-align: center;
-            width: 40%;
+            flex: 1;
         }
 
         .signature-line {
-            border-bottom: 1px solid #000;
-            margin-bottom: 5px;
+            border-bottom: 2px solid #2c3e50;
+            margin-bottom: 10px;
             height: 60px;
         }
 
         .company-name {
             font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+
+        .signature-label {
+            font-size: 11px;
+            color: #777;
         }
 
         .editable {
@@ -105,14 +134,24 @@
             body {
                 padding: 20px 40px;
             }
+            .conditions {
+                background: white;
+                border-left: 2px solid #ccc;
+            }
+            .section-title {
+                background: #f0f0f0;
+            }
+            .total-section {
+                background: #f8f8f8;
+            }
         }
     </style>
 </head>
 <body>
     <div class="client-info">
-        <div class="editable">{{ cliente_nombre }}</div>
-        <div class="editable">{{ cliente_direccion }}</div>
-        <div class="editable">{{ cliente_nif }}</div>
+        <div class="editable">{{ cliente_nombre if cliente_nombre else '' }}</div>
+        {% if cliente_direccion %}<div class="editable">{{ cliente_direccion }}</div>{% endif %}
+        {% if cliente_nif %}<div class="editable">{{ cliente_nif }}</div>{% endif %}
     </div>
 
     <div class="date editable">
@@ -124,7 +163,7 @@
     </div>
 
     <div class="intro editable">
-        A continuación, detallamos desglose de presupuesto aproximado de trabajos a realizar en sus instalaciones
+        A continuación, detallamos desglose de presupuesto aproximado de trabajos a realizar en sus instalaciones.
     </div>
 
     <div class="section-title">MATERIALES</div>
@@ -160,13 +199,13 @@
         <div class="signature-box">
             <div class="signature-line"></div>
             <div class="company-name editable">BARAJAS PEÑA S.L.</div>
-            <div class="editable">FIRMA DEL CONSTRUCTOR:</div>
+            <div class="signature-label editable">FIRMA DEL CONSTRUCTOR</div>
         </div>
 
         <div class="signature-box">
             <div class="signature-line"></div>
-            <div class="editable">{{ cliente_nombre }}</div>
-            <div class="editable">FIRMA DEL PROMOTOR:</div>
+            <div class="editable">{{ cliente_nombre if cliente_nombre else '' }}</div>
+            <div class="signature-label editable">FIRMA DEL PROMOTOR</div>
         </div>
     </div>
 </body>

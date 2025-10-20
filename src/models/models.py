@@ -70,6 +70,7 @@ class Material(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     nombre = Column(String(200), nullable=False)
+    familia = Column(String(100), default='General')  # Categoría/familia del material
     descripcion = Column(Text)
     unidad = Column(String(20), nullable=False, default='ud')  # ud, m, m2, m3, kg, l, etc.
     precio_compra = Column(Float, nullable=False, default=0.0)
@@ -89,7 +90,7 @@ class Material(Base):
     materiales_usados = relationship("MaterialUsado", back_populates="material")
 
     def __repr__(self):
-        return f"{self.nombre} ({self.unidad}) - C:{self.precio_compra}€ V:{self.precio_venta}€"
+        return f"[{self.familia}] {self.nombre} ({self.unidad}) - C:{self.precio_compra}€ V:{self.precio_venta}€"
 
 
 class Presupuesto(Base):
