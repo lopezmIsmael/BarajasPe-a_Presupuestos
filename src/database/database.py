@@ -4,7 +4,7 @@ Capa de acceso a datos y gestión de la base de datos SQLite.
 import os
 from datetime import datetime
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.orm import sessionmaker, scoped_session, joinedload
 from sqlalchemy.engine import Engine
 from src.models.models import Base, Cliente, Trabajador, Material, Presupuesto, LineaPresupuesto, ParteTrabajo, DetalleManoObra, MaterialUsado
 
@@ -143,6 +143,13 @@ class TrabajadorDAO:
         """Crea un nuevo trabajador"""
         session = self.db.get_session()
         try:
+            # Validar DNI único solo si tiene valor
+            dni = kwargs.get('dni', '').strip()
+            if dni:
+                existe = session.query(Trabajador).filter(Trabajador.dni == dni).first()
+                if existe:
+                    raise ValueError(f"Ya existe un trabajador con el DNI {dni}")
+
             trabajador = Trabajador(**kwargs)
             session.add(trabajador)
             session.commit()
@@ -179,6 +186,16 @@ class TrabajadorDAO:
         try:
             trabajador = session.query(Trabajador).filter(Trabajador.id == id).first()
             if trabajador:
+                # Validar DNI único solo si tiene valor y cambió
+                dni = kwargs.get('dni', '').strip()
+                if dni and dni != trabajador.dni:
+                    existe = session.query(Trabajador).filter(
+                        Trabajador.dni == dni,
+                        Trabajador.id != id
+                    ).first()
+                    if existe:
+                        raise ValueError(f"Ya existe un trabajador con el DNI {dni}")
+
                 for key, value in kwargs.items():
                     if hasattr(trabajador, key):
                         setattr(trabajador, key, value)
@@ -337,18 +354,33 @@ class PresupuestoDAO:
             self.db.close_session(session)
 
     def obtener_por_id(self, id):
-        """Obtiene un presupuesto por ID"""
+        """Obtiene un presupuesto por ID con eager loading"""
         session = self.db.get_session()
         try:
-            return session.query(Presupuesto).filter(Presupuesto.id == id).first()
+            presupuesto = session.query(Presupuesto).options(
+                joinedload(Presupuesto.cliente),
+                joinedload(Presupuesto.lineas).joinedload(LineaPresupuesto.material)
+            ).filter(Presupuesto.id == id).first()
+
+            # Expunge para desvincularlo de la sesión
+            if presupuesto:
+                session.expunge_all()
+            return presupuesto
         finally:
             self.db.close_session(session)
 
     def obtener_todos(self):
-        """Obtiene todos los presupuestos"""
+        """Obtiene todos los presupuestos con eager loading"""
         session = self.db.get_session()
         try:
-            return session.query(Presupuesto).order_by(Presupuesto.fecha_creacion.desc()).all()
+            presupuestos = session.query(Presupuesto).options(
+                joinedload(Presupuesto.cliente),
+                joinedload(Presupuesto.lineas)
+            ).order_by(Presupuesto.fecha_creacion.desc()).all()
+
+            # Expunge para desvincularlos de la sesión
+            session.expunge_all()
+            return presupuestos
         finally:
             self.db.close_session(session)
 
@@ -434,18 +466,34 @@ class ParteTrabajoDAO:
             self.db.close_session(session)
 
     def obtener_por_id(self, id):
-        """Obtiene un parte de trabajo por ID"""
+        """Obtiene un parte de trabajo por ID con eager loading"""
         session = self.db.get_session()
         try:
-            return session.query(ParteTrabajo).filter(ParteTrabajo.id == id).first()
+            parte = session.query(ParteTrabajo).options(
+                joinedload(ParteTrabajo.detalles_mano_obra).joinedload(DetalleManoObra.trabajador),
+                joinedload(ParteTrabajo.materiales_usados).joinedload(MaterialUsado.material),
+                joinedload(ParteTrabajo.presupuesto)
+            ).filter(ParteTrabajo.id == id).first()
+
+            # Expunge para desvincularlo de la sesión
+            if parte:
+                session.expunge_all()
+            return parte
         finally:
             self.db.close_session(session)
 
     def obtener_todos(self):
-        """Obtiene todos los partes de trabajo"""
+        """Obtiene todos los partes de trabajo con eager loading"""
         session = self.db.get_session()
         try:
-            return session.query(ParteTrabajo).order_by(ParteTrabajo.fecha_creacion.desc()).all()
+            partes = session.query(ParteTrabajo).options(
+                joinedload(ParteTrabajo.detalles_mano_obra),
+                joinedload(ParteTrabajo.materiales_usados)
+            ).order_by(ParteTrabajo.fecha_creacion.desc()).all()
+
+            # Expunge para desvincularlos de la sesión
+            session.expunge_all()
+            return partes
         finally:
             self.db.close_session(session)
 

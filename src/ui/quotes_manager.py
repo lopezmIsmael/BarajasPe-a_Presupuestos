@@ -348,11 +348,21 @@ class QuoteEditor(QDialog):
         layout.addWidget(totals_group)
 
         # Botones
+        buttons_layout = QHBoxLayout()
+
+        self.preview_button = QPushButton("👁️ Vista Previa")
+        self.preview_button.clicked.connect(self.preview_quote)
+        buttons_layout.addWidget(self.preview_button)
+
+        buttons_layout.addStretch()
+
         button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save |
                                        QDialogButtonBox.StandardButton.Cancel)
         button_box.accepted.connect(self.save_quote)
         button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
+        buttons_layout.addWidget(button_box)
+
+        layout.addLayout(buttons_layout)
 
         self.setLayout(layout)
 
@@ -414,8 +424,31 @@ class QuoteEditor(QDialog):
         if selected_row < 0:
             return
 
-        # TODO: Implementar edición de línea
-        show_info(self, "Info", "Función de edición en desarrollo")
+        if selected_row >= len(self.lineas_temp):
+            return
+
+        # Obtener la línea a editar
+        linea_data = self.lineas_temp[selected_row]
+
+        # Crear objeto similar a LineaPresupuesto para el diálogo
+        class LineaTemporal:
+            def __init__(self, data):
+                self.material_id = data['material_id']
+                self.cantidad = data['cantidad']
+                self.precio_compra_unitario = data['precio_compra_unitario']
+                self.margen_ganancia_porc = data['margen_ganancia_porc']
+                self.descripcion_personalizada = data.get('descripcion_personalizada', '')
+
+        linea_temp = LineaTemporal(linea_data)
+
+        # Abrir diálogo de edición
+        dialog = AddLineDialog(self, db=self.db, linea=linea_temp)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Actualizar la línea
+            new_data = dialog.get_line_data()
+            self.lineas_temp[selected_row] = new_data
+            self.refresh_lines_table()
+            self.calcular_totales()
 
     def delete_line(self):
         """Elimina una línea del presupuesto"""
@@ -539,6 +572,105 @@ class QuoteEditor(QDialog):
 
         self.refresh_lines_table()
         self.calcular_totales()
+
+    def preview_quote(self):
+        """Muestra una vista previa del presupuesto"""
+        # Validaciones básicas
+        if self.cliente_combo.currentIndex() < 0:
+            show_error(self, "Error", "Debe seleccionar un cliente para la vista previa")
+            return
+
+        if len(self.lineas_temp) == 0:
+            show_error(self, "Error", "Debe añadir al menos una línea para la vista previa")
+            return
+
+        try:
+            # Crear un presupuesto temporal con los datos actuales
+            from src.templates.template_engine import TemplateEngine
+            from src.ui.document_viewer import DocumentViewer
+
+            # Obtener datos del cliente
+            cliente_dao = ClienteDAO(self.db)
+            cliente = cliente_dao.obtener_por_id(self.cliente_combo.currentData())
+
+            # Crear objeto presupuesto temporal
+            class PresupuestoTemporal:
+                def __init__(self, editor):
+                    self.numero = editor.numero_input.text()
+                    self.fecha_creacion = datetime(
+                        editor.fecha_input.date().year(),
+                        editor.fecha_input.date().month(),
+                        editor.fecha_input.date().day()
+                    )
+                    qdate_validez = editor.fecha_validez_input.date()
+                    self.fecha_validez = date(qdate_validez.year(), qdate_validez.month(), qdate_validez.day())
+                    self.estado = editor.estado_combo.currentText()
+                    self.titulo = editor.titulo_input.text()
+                    self.descripcion = editor.descripcion_input.toPlainText()
+                    self.coste_mano_obra = editor.coste_mano_obra_input.value()
+                    self.descuento_global = editor.descuento_input.value()
+                    self.notas_internas = ""
+                    self.cliente = cliente
+                    self.lineas = []
+
+                    # Crear líneas temporales
+                    dao_material = MaterialDAO(editor.db)
+                    for linea_data in editor.lineas_temp:
+                        material = dao_material.obtener_por_id(linea_data['material_id'])
+                        linea = type('LineaTemporal', (), {
+                            'material': material,
+                            'cantidad': linea_data['cantidad'],
+                            'precio_compra_unitario': linea_data['precio_compra_unitario'],
+                            'margen_ganancia_porc': linea_data['margen_ganancia_porc'],
+                            'descripcion_personalizada': linea_data.get('descripcion_personalizada', ''),
+                            'coste_total': linea_data['cantidad'] * linea_data['precio_compra_unitario'],
+                            'ganancia_importe': (linea_data['cantidad'] * linea_data['precio_compra_unitario']) * (linea_data['margen_ganancia_porc'] / 100),
+                            'precio_venta_unitario': linea_data['precio_compra_unitario'] * (1 + linea_data['margen_ganancia_porc'] / 100),
+                            'precio_venta_total': (linea_data['cantidad'] * linea_data['precio_compra_unitario']) * (1 + linea_data['margen_ganancia_porc'] / 100)
+                        })()
+                        self.lineas.append(linea)
+
+                @property
+                def total_materiales_coste(self):
+                    return sum(l.coste_total for l in self.lineas)
+
+                @property
+                def total_materiales_venta(self):
+                    return sum(l.precio_venta_total for l in self.lineas)
+
+                @property
+                def ganancia_materiales(self):
+                    return self.total_materiales_venta - self.total_materiales_coste
+
+                @property
+                def subtotal(self):
+                    return self.total_materiales_venta + self.coste_mano_obra
+
+                @property
+                def descuento_importe(self):
+                    return self.subtotal * (self.descuento_global / 100.0)
+
+                @property
+                def total_final(self):
+                    return self.subtotal - self.descuento_importe
+
+            presupuesto_temp = PresupuestoTemporal(self)
+
+            # Generar HTML
+            engine = TemplateEngine()
+            html_content = engine.render_quote(presupuesto_temp)
+
+            # Mostrar en visor
+            viewer = DocumentViewer(
+                self,
+                html_content,
+                f"Vista Previa - Presupuesto {presupuesto_temp.numero}",
+                editable=False
+            )
+            viewer.exec()
+
+        except Exception as e:
+            show_error(self, "Error", f"Error al generar vista previa: {str(e)}")
 
     def save_quote(self):
         """Guarda el presupuesto"""

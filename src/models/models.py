@@ -45,7 +45,7 @@ class Trabajador(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     nombre = Column(String(100), nullable=False)
     apellidos = Column(String(100), nullable=False)
-    dni = Column(String(20), unique=True)
+    dni = Column(String(20), unique=False, nullable=True)  # Cambiado: permitir múltiples vacíos
     telefono = Column(String(20))
     email = Column(String(100))
     direccion = Column(String(200))
