@@ -41,16 +41,43 @@ class AddLineDialog(QDialog):
         """Inicializa la interfaz"""
         self.setWindowTitle("Añadir Línea" if not self.linea else "Editar Línea")
         self.setModal(True)
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(600)
 
         layout = QVBoxLayout()
+
+        # Grupo de búsqueda y filtros
+        search_group = QGroupBox("Búsqueda de Material")
+        search_layout = QVBoxLayout()
+
+        # Búsqueda por nombre
+        search_name_layout = QHBoxLayout()
+        search_label = QLabel("Buscar:")
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Escribe para buscar por nombre...")
+        self.search_input.textChanged.connect(self.filter_materials)
+        search_name_layout.addWidget(search_label)
+        search_name_layout.addWidget(self.search_input)
+        search_layout.addLayout(search_name_layout)
+
+        # Filtro por familia
+        family_layout = QHBoxLayout()
+        family_label = QLabel("Familia:")
+        self.family_combo = QComboBox()
+        self.family_combo.addItem("Todas las familias", "")
+        self.family_combo.currentTextChanged.connect(self.filter_materials)
+        family_layout.addWidget(family_label)
+        family_layout.addWidget(self.family_combo)
+        search_layout.addLayout(family_layout)
+
+        search_group.setLayout(search_layout)
+        layout.addWidget(search_group)
 
         form_layout = QFormLayout()
 
         # Material
         material_layout = QHBoxLayout()
         self.material_combo = QComboBox()
-        self.material_combo.setMinimumWidth(300)
+        self.material_combo.setMinimumWidth(400)
         self.new_material_btn = QPushButton("+ Nuevo")
         self.new_material_btn.clicked.connect(self.new_material)
         material_layout.addWidget(self.material_combo)
@@ -115,27 +142,70 @@ class AddLineDialog(QDialog):
         self.setLayout(layout)
 
     def load_materials(self):
-        """Carga los materiales en el combo"""
+        """Carga los materiales y las familias"""
         try:
             dao = MaterialDAO(self.db)
             self.materiales = dao.obtener_todos()
 
-            self.material_combo.clear()
+            # Cargar familias únicas
+            familias = set()
             for material in self.materiales:
-                self.material_combo.addItem(
-                    f"{material.nombre} ({material.unidad}) - {format_currency(material.precio_compra)}",
-                    material.id
-                )
+                if material.familia:
+                    familias.add(material.familia)
+
+            # Poblar combo de familias
+            self.family_combo.clear()
+            self.family_combo.addItem("Todas las familias", "")
+            for familia in sorted(familias):
+                self.family_combo.addItem(familia, familia)
+
+            # Cargar materiales en el combo
+            self.filter_materials()
 
         except Exception as e:
             show_error(self, "Error", f"Error al cargar materiales: {str(e)}")
 
+    def filter_materials(self):
+        """Filtra los materiales según búsqueda y familia"""
+        search_text = self.search_input.text().lower() if hasattr(self, 'search_input') else ""
+        selected_family = self.family_combo.currentData() if hasattr(self, 'family_combo') else ""
+
+        self.material_combo.clear()
+
+        for material in self.materiales:
+            # Filtrar por familia
+            if selected_family and material.familia != selected_family:
+                continue
+
+            # Filtrar por búsqueda de texto
+            if search_text and search_text not in material.nombre.lower():
+                continue
+
+            # Añadir al combo
+            familia_tag = f"[{material.familia}] " if material.familia else ""
+            self.material_combo.addItem(
+                f"{familia_tag}{material.nombre} ({material.unidad}) - {format_currency(material.precio_compra)}",
+                material.id
+            )
+
+        # Si hay resultados, seleccionar el primero
+        if self.material_combo.count() > 0:
+            self.material_combo.setCurrentIndex(0)
+
     def on_material_changed(self, index):
         """Cuando se selecciona un material, auto-rellena los datos"""
-        if index < 0 or index >= len(self.materiales):
+        if index < 0:
             return
 
-        material = self.materiales[index]
+        material_id = self.material_combo.currentData()
+        if not material_id:
+            return
+
+        # Buscar el material por ID
+        material = next((m for m in self.materiales if m.id == material_id), None)
+        if not material:
+            return
+
         self.precio_compra_input.setValue(material.precio_compra)
         self.margen_input.setValue(material.margen_ganancia_defecto)
         self.calcular_totales()
