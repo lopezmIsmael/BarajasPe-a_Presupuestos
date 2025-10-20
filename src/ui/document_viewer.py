@@ -7,7 +7,6 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineSettings
 from PyQt6.QtCore import Qt, QUrl, QMarginsF
 from PyQt6.QtGui import QPageLayout, QPageSize, QAction
-from PyQt6.QtPrintSupport import QPrinter
 import os
 
 
@@ -212,30 +211,66 @@ class DocumentViewer(QDialog):
         )
 
     def print_document(self):
-        """Imprime el documento"""
-        # Crear printer
-        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
-        printer.setPageOrientation(QPageLayout.Orientation.Portrait)
+        """Imprime el documento - Genera PDF temporal para imprimir"""
+        try:
+            import tempfile
+            import os
+            from PyQt6.QtCore import QTimer
 
-        # Configurar márgenes
-        page_layout = QPageLayout()
-        page_layout.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
-        page_layout.setOrientation(QPageLayout.Orientation.Portrait)
-        page_layout.setMargins(QMarginsF(15, 15, 15, 15))
+            # Crear archivo temporal PDF
+            temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+            temp_pdf_path = temp_pdf.name
+            temp_pdf.close()
 
-        # Mostrar diálogo de impresión
-        from PyQt6.QtPrintSupport import QPrintDialog
-        print_dialog = QPrintDialog(printer, self)
+            # Configurar layout de página
+            page_layout = QPageLayout()
+            page_layout.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+            page_layout.setOrientation(QPageLayout.Orientation.Portrait)
+            page_layout.setMargins(QMarginsF(15, 15, 15, 15))
 
-        if print_dialog.exec() == QDialog.DialogCode.Accepted:
-            # Imprimir
-            self.web_view.page().print(printer, lambda success:
-                QMessageBox.information(
-                    self,
-                    "Impresión",
-                    "Documento enviado a la impresora" if success else "Error al imprimir"
-                )
+            # Función de callback cuando se genera el PDF
+            def on_pdf_generated(success):
+                if success and os.path.exists(temp_pdf_path):
+                    try:
+                        # Abrir el PDF con el visor predeterminado para que el usuario pueda imprimir
+                        if os.name == 'posix':  # Linux/Mac
+                            import subprocess
+                            subprocess.Popen(['xdg-open', temp_pdf_path])
+                        elif os.name == 'nt':  # Windows
+                            os.startfile(temp_pdf_path)
+
+                        QMessageBox.information(
+                            self,
+                            "Impresión",
+                            "PDF generado. Use el visor de PDF para imprimir el documento."
+                        )
+
+                        # Limpiar archivo temporal después de 30 segundos
+                        QTimer.singleShot(30000, lambda: os.unlink(temp_pdf_path) if os.path.exists(temp_pdf_path) else None)
+                    except Exception as e:
+                        QMessageBox.information(
+                            self,
+                            "PDF generado",
+                            f"PDF guardado en: {temp_pdf_path}\nÁbrelo para imprimir."
+                        )
+                else:
+                    QMessageBox.warning(
+                        self,
+                        "Error",
+                        "Error al generar PDF para impresión"
+                    )
+
+            # Generar PDF
+            self.web_view.page().printToPdf(temp_pdf_path, page_layout)
+
+            # Esperar a que se genere el PDF
+            QTimer.singleShot(1000, lambda: on_pdf_generated(os.path.exists(temp_pdf_path)))
+
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Error de impresión",
+                f"No se pudo preparar el documento para impresión: {str(e)}"
             )
 
     def zoom_in(self):
