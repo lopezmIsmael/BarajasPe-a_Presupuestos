@@ -14,6 +14,8 @@ from src.utils.helpers import (show_error, show_info, confirm_dialog,
                                format_currency, format_date)
 from src.ui.clients_manager import ClientDialog
 from src.ui.materials_manager import MaterialDialog
+from src.templates.template_engine import TemplateEngine
+from src.ui.document_viewer import DocumentViewer
 
 
 class AddLineDialog(QDialog):
@@ -728,7 +730,40 @@ class QuotesManager(QWidget):
 
     def view_quote(self):
         """Ver/Generar PDF del presupuesto"""
-        show_info(self, "Info", "Función de generación de PDF en desarrollo (Fase 3)")
+        selected_row = self.table.currentRow()
+        if selected_row < 0:
+            return
+
+        presupuesto_id = int(self.table.item(selected_row, 0).text())
+        presupuesto = self.dao.obtener_por_id(presupuesto_id)
+
+        if not presupuesto:
+            show_error(self, "Error", "Presupuesto no encontrado")
+            return
+
+        try:
+            # Generar HTML desde la plantilla
+            engine = TemplateEngine()
+            html_content = engine.render_quote(presupuesto)
+
+            # Mostrar en el visor con opción de editar
+            viewer = DocumentViewer(
+                self,
+                html_content,
+                f"Presupuesto {presupuesto.numero}",
+                editable=True
+            )
+
+            if viewer.exec() == QDialog.DialogCode.Accepted:
+                # Si se editó, guardar el HTML editado
+                edited_html = viewer.get_html_content()
+                if edited_html != html_content:
+                    # Actualizar el contenido HTML en la base de datos
+                    self.dao.actualizar(presupuesto.id, contenido_html=edited_html)
+                    show_info(self, "Guardado", "Los cambios se han guardado correctamente")
+
+        except Exception as e:
+            show_error(self, "Error", f"Error al generar el documento: {str(e)}")
 
     def delete_quote(self):
         """Elimina el presupuesto seleccionado"""

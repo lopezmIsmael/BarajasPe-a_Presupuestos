@@ -13,6 +13,8 @@ from src.database.database import (ParteTrabajoDAO, PresupuestoDAO, TrabajadorDA
                                    MaterialDAO, DetalleManoObra, MaterialUsado, Database)
 from src.utils.helpers import (show_error, show_info, confirm_dialog,
                                format_currency, format_date)
+from src.templates.template_engine import TemplateEngine
+from src.ui.document_viewer import DocumentViewer
 
 
 class WorkReportEditor(QDialog):
@@ -794,7 +796,40 @@ class WorkReportsManager(QWidget):
 
     def view_report(self):
         """Ver/Generar PDF del parte"""
-        show_info(self, "Info", "Función de generación de PDF en desarrollo (Fase 3)")
+        selected_row = self.table.currentRow()
+        if selected_row < 0:
+            return
+
+        parte_id = int(self.table.item(selected_row, 0).text())
+        parte = self.dao.obtener_por_id(parte_id)
+
+        if not parte:
+            show_error(self, "Error", "Parte no encontrado")
+            return
+
+        try:
+            # Generar HTML desde la plantilla
+            engine = TemplateEngine()
+            html_content = engine.render_work_report(parte)
+
+            # Mostrar en el visor con opción de editar
+            viewer = DocumentViewer(
+                self,
+                html_content,
+                f"Parte de Trabajo {parte.numero}",
+                editable=True
+            )
+
+            if viewer.exec() == QDialog.DialogCode.Accepted:
+                # Si se editó, guardar el HTML editado
+                edited_html = viewer.get_html_content()
+                if edited_html != html_content:
+                    # Actualizar el contenido HTML en la base de datos
+                    self.dao.actualizar(parte.id, contenido_html=edited_html)
+                    show_info(self, "Guardado", "Los cambios se han guardado correctamente")
+
+        except Exception as e:
+            show_error(self, "Error", f"Error al generar el documento: {str(e)}")
 
     def delete_report(self):
         """Elimina el parte seleccionado"""
