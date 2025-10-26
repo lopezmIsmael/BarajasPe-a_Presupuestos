@@ -16,7 +16,10 @@ class DocumentViewer(QDialog):
     def __init__(self, parent=None, html_content="", title="Documento", editable=False):
         super().__init__(parent)
         self.html_content = html_content
+        self.original_html = html_content
         self.editable = editable
+        self._html_saved = False
+        self._was_edited = False
         self.init_ui(title)
         self.load_content()
 
@@ -91,7 +94,7 @@ class DocumentViewer(QDialog):
             button_layout.addWidget(self.save_changes_button)
 
         self.close_button = QPushButton("Cerrar")
-        self.close_button.clicked.connect(self.accept)
+        self.close_button.clicked.connect(self.on_close_clicked)
         button_layout.addWidget(self.close_button)
 
         layout.addLayout(button_layout)
@@ -178,16 +181,36 @@ class DocumentViewer(QDialog):
     def on_html_received(self, html):
         """Callback cuando se recibe el HTML editado"""
         self.html_content = html
+        self._html_saved = True
+        self._was_edited = True
         QMessageBox.information(
             self,
             "Guardado",
-            "Los cambios han sido guardados en memoria.\n\n"
-            "Nota: Los cambios se aplicarán al documento actual."
+            "Los cambios han sido guardados.\n\n"
+            "Al cerrar el documento, los cambios se aplicarán definitivamente."
         )
+
+    def on_close_clicked(self):
+        """Maneja el evento de cerrar el diálogo"""
+        if self.editable and self._html_saved:
+            # Solo capturar HTML si se presionó "Guardar Cambios"
+            self.web_view.page().toHtml(self.on_html_for_close)
+        else:
+            # Si no se guardó, simplemente cerrar sin capturar HTML
+            self.accept()
+
+    def on_html_for_close(self, html):
+        """Callback para obtener HTML al cerrar"""
+        self.html_content = html
+        self.accept()
 
     def get_html_content(self):
         """Retorna el contenido HTML actual"""
         return self.html_content
+
+    def was_edited(self):
+        """Retorna True si el documento fue editado"""
+        return self._was_edited
 
     def save_as_pdf(self):
         """Guarda el documento como PDF"""

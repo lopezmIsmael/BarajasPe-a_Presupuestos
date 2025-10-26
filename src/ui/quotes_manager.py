@@ -1083,9 +1083,13 @@ class QuotesManager(QWidget):
             return
 
         try:
-            # Generar HTML desde la plantilla
-            engine = TemplateEngine()
-            html_content = engine.render_quote(presupuesto)
+            # Si ya existe HTML guardado, usarlo; si no, generar desde plantilla
+            if presupuesto.contenido_html:
+                html_content = presupuesto.contenido_html
+            else:
+                # Generar HTML desde la plantilla
+                engine = TemplateEngine()
+                html_content = engine.render_quote(presupuesto)
 
             # Mostrar en el visor con opción de editar
             viewer = DocumentViewer(
@@ -1096,10 +1100,10 @@ class QuotesManager(QWidget):
             )
 
             if viewer.exec() == QDialog.DialogCode.Accepted:
-                # Si se editó, guardar el HTML editado
-                edited_html = viewer.get_html_content()
-                if edited_html != html_content:
-                    # Actualizar el contenido HTML en la base de datos
+                # Solo guardar si se editó el documento
+                if viewer.was_edited():
+                    edited_html = viewer.get_html_content()
+                    # Guardar el HTML editado en la base de datos
                     self.dao.actualizar(presupuesto.id, contenido_html=edited_html)
                     show_info(self, "Guardado", "Los cambios se han guardado correctamente")
 
