@@ -144,6 +144,9 @@ class MainWindow(QMainWindow):
         self.materials_tab.material_created.connect(self.on_material_changed)
         self.materials_tab.material_updated.connect(self.on_material_changed)
 
+        # Conectar señal de actualización de materiales desde presupuestos
+        self.quotes_tab.material_updated.connect(self.on_material_updated_from_quote)
+
     def on_material_changed(self, material):
         """Maneja cuando se crea o actualiza un material"""
         self.status_bar.showMessage(f"Material actualizado: {material.nombre} - Actualizando vistas...")
@@ -151,6 +154,12 @@ class MainWindow(QMainWindow):
         self.quotes_tab.load_quotes()
         # Recargar partes de trabajo
         self.reports_tab.load_reports()
+
+    def on_material_updated_from_quote(self, material_id):
+        """Maneja cuando se actualiza un material desde un presupuesto"""
+        # Recargar el gestor de materiales para reflejar los cambios
+        self.materials_tab.load_materials()
+        self.status_bar.showMessage(f"Material actualizado desde presupuesto - ID: {material_id}")
 
     def new_quote(self):
         """Crea un nuevo presupuesto"""

@@ -21,21 +21,27 @@ from src.ui.document_viewer import DocumentViewer
 class AddLineDialog(QDialog):
     """Diálogo para añadir una línea al presupuesto"""
 
+    material_updated = pyqtSignal(int)  # Señal que emite el ID del material actualizado
+
     def __init__(self, parent=None, db=None, linea=None):
         super().__init__(parent)
         self.db = db
         self.linea = linea
         self.materiales = []
+        self._updating_prices = False  # Flag para evitar loops infinitos
         self.init_ui()
+
+        # Conectar señales ANTES de cargar materiales
+        self.cantidad_input.valueChanged.connect(self.calcular_totales)
+        self.precio_compra_input.valueChanged.connect(self.on_precio_compra_changed)
+        self.margen_input.valueChanged.connect(self.on_margen_changed)
+        self.precio_venta_unitario_input.valueChanged.connect(self.on_precio_venta_changed)
+        self.material_combo.currentIndexChanged.connect(self.on_material_changed)
+
         self.load_materials()
 
         if linea:
             self.load_line_data()
-        else:
-            # Conectar señales para cálculo automático
-            self.cantidad_input.valueChanged.connect(self.calcular_totales)
-            self.margen_input.valueChanged.connect(self.calcular_totales)
-            self.material_combo.currentIndexChanged.connect(self.on_material_changed)
 
     def init_ui(self):
         """Inicializa la interfaz"""
@@ -106,6 +112,14 @@ class AddLineDialog(QDialog):
         self.margen_input.setSuffix(" %")
         self.margen_input.setValue(20.0)
         form_layout.addRow("Margen Ganancia (%):", self.margen_input)
+
+        # Precio de venta unitario
+        self.precio_venta_unitario_input = QDoubleSpinBox()
+        self.precio_venta_unitario_input.setRange(0, 999999.99)
+        self.precio_venta_unitario_input.setDecimals(2)
+        self.precio_venta_unitario_input.setSuffix(" €")
+        self.precio_venta_unitario_input.setGroupSeparatorShown(True)
+        form_layout.addRow("Precio Venta Unit.:", self.precio_venta_unitario_input)
 
         # Descripción personalizada
         self.descripcion_input = QTextEdit()
@@ -206,19 +220,90 @@ class AddLineDialog(QDialog):
         if not material:
             return
 
-        self.precio_compra_input.setValue(material.precio_compra)
-        self.margen_input.setValue(material.margen_ganancia_defecto)
+        # Bloquear actualizaciones automáticas mientras cargamos los datos
+        self._updating_prices = True
+        try:
+            # Establecer precio de compra del material
+            self.precio_compra_input.setValue(material.precio_compra if material.precio_compra else 0.0)
+
+            # Establecer precio de venta y margen
+            if material.precio_venta and material.precio_compra and material.precio_compra > 0:
+                # Usar el precio de venta del material
+                self.precio_venta_unitario_input.setValue(material.precio_venta)
+                # Calcular el margen real del material
+                margen_real = ((material.precio_venta - material.precio_compra) / material.precio_compra) * 100
+                self.margen_input.setValue(margen_real)
+            else:
+                # Si no hay precio de venta, usar el margen por defecto del material
+                margen_defecto = material.margen_ganancia_defecto if material.margen_ganancia_defecto else 20.0
+                self.margen_input.setValue(margen_defecto)
+                # Calcular precio de venta basado en margen
+                precio_venta = material.precio_compra * (1 + margen_defecto / 100.0)
+                self.precio_venta_unitario_input.setValue(precio_venta)
+
+        finally:
+            self._updating_prices = False
+
+        # Recalcular totales con los nuevos valores
         self.calcular_totales()
+
+    def on_precio_compra_changed(self):
+        """Cuando cambia el precio de compra, recalcular precio de venta basado en margen"""
+        if self._updating_prices:
+            return
+
+        self._updating_prices = True
+        try:
+            precio_compra = self.precio_compra_input.value()
+            margen = self.margen_input.value()
+            precio_venta_unitario = precio_compra * (1 + margen / 100.0)
+            self.precio_venta_unitario_input.setValue(precio_venta_unitario)
+            self.calcular_totales()
+        finally:
+            self._updating_prices = False
+
+    def on_margen_changed(self):
+        """Cuando cambia el margen, recalcular precio de venta"""
+        if self._updating_prices:
+            return
+
+        self._updating_prices = True
+        try:
+            precio_compra = self.precio_compra_input.value()
+            margen = self.margen_input.value()
+            precio_venta_unitario = precio_compra * (1 + margen / 100.0)
+            self.precio_venta_unitario_input.setValue(precio_venta_unitario)
+            self.calcular_totales()
+        finally:
+            self._updating_prices = False
+
+    def on_precio_venta_changed(self):
+        """Cuando cambia el precio de venta, recalcular margen"""
+        if self._updating_prices:
+            return
+
+        self._updating_prices = True
+        try:
+            precio_compra = self.precio_compra_input.value()
+            precio_venta = self.precio_venta_unitario_input.value()
+
+            if precio_compra > 0:
+                margen = ((precio_venta - precio_compra) / precio_compra) * 100
+                self.margen_input.setValue(margen)
+
+            self.calcular_totales()
+        finally:
+            self._updating_prices = False
 
     def calcular_totales(self):
         """Calcula los totales automáticamente"""
         cantidad = self.cantidad_input.value()
         precio_compra = self.precio_compra_input.value()
-        margen = self.margen_input.value()
+        precio_venta_unitario = self.precio_venta_unitario_input.value()
 
         coste_total = cantidad * precio_compra
-        ganancia = coste_total * (margen / 100.0)
-        precio_venta_total = coste_total + ganancia
+        precio_venta_total = cantidad * precio_venta_unitario
+        ganancia = precio_venta_total - coste_total
 
         self.coste_total_label.setText(format_currency(coste_total))
         self.ganancia_label.setText(format_currency(ganancia))
@@ -239,16 +324,27 @@ class AddLineDialog(QDialog):
 
     def load_line_data(self):
         """Carga los datos de una línea existente"""
-        # Buscar y seleccionar el material
-        for i, m in enumerate(self.materiales):
-            if m.id == self.linea.material_id:
-                self.material_combo.setCurrentIndex(i)
-                break
+        # Bloquear actualizaciones automáticas mientras cargamos los datos
+        self._updating_prices = True
+        try:
+            # Buscar y seleccionar el material
+            for i, m in enumerate(self.materiales):
+                if m.id == self.linea.material_id:
+                    self.material_combo.setCurrentIndex(i)
+                    break
 
-        self.cantidad_input.setValue(self.linea.cantidad)
-        self.precio_compra_input.setValue(self.linea.precio_compra_unitario)
-        self.margen_input.setValue(self.linea.margen_ganancia_porc)
-        self.descripcion_input.setPlainText(self.linea.descripcion_personalizada or "")
+            self.cantidad_input.setValue(self.linea.cantidad)
+            self.precio_compra_input.setValue(self.linea.precio_compra_unitario)
+            self.margen_input.setValue(self.linea.margen_ganancia_porc)
+
+            # Calcular precio de venta unitario desde la línea
+            precio_venta_unitario = self.linea.precio_compra_unitario * (1 + self.linea.margen_ganancia_porc / 100.0)
+            self.precio_venta_unitario_input.setValue(precio_venta_unitario)
+
+            self.descripcion_input.setPlainText(self.linea.descripcion_personalizada or "")
+        finally:
+            self._updating_prices = False
+
         self.calcular_totales()
 
     def accept_dialog(self):
@@ -260,6 +356,38 @@ class AddLineDialog(QDialog):
         if self.cantidad_input.value() <= 0:
             show_error(self, "Error", "La cantidad debe ser mayor que 0")
             return
+
+        # Actualizar el material en la base de datos con los nuevos precios
+        try:
+            material_id = self.material_combo.currentData()
+            material = next((m for m in self.materiales if m.id == material_id), None)
+
+            if material:
+                precio_compra_actual = self.precio_compra_input.value()
+                precio_venta_actual = self.precio_venta_unitario_input.value()
+                margen_actual = self.margen_input.value()
+
+                # Solo actualizar si los precios han cambiado
+                if (precio_compra_actual != material.precio_compra or
+                    precio_venta_actual != material.precio_venta or
+                    margen_actual != material.margen_ganancia_defecto):
+
+                    dao = MaterialDAO(self.db)
+                    dao.actualizar(
+                        material_id,
+                        precio_compra=precio_compra_actual,
+                        precio_venta=precio_venta_actual,
+                        margen_ganancia_defecto=margen_actual
+                    )
+
+                    # Recargar la lista de materiales para reflejar los cambios
+                    self.load_materials()
+
+                    # Emitir señal de que el material fue actualizado
+                    self.material_updated.emit(material_id)
+        except Exception as e:
+            # No fallar si hay error al actualizar el material, solo mostrar advertencia
+            show_error(self, "Advertencia", f"No se pudo actualizar el material: {str(e)}")
 
         self.accept()
 
@@ -276,6 +404,8 @@ class AddLineDialog(QDialog):
 
 class QuoteEditor(QDialog):
     """Editor de presupuesto"""
+
+    material_updated = pyqtSignal(int)  # Señal para propagar actualizaciones de materiales
 
     def __init__(self, parent=None, db=None, presupuesto=None):
         super().__init__(parent)
@@ -482,6 +612,8 @@ class QuoteEditor(QDialog):
     def add_line(self):
         """Añade una línea al presupuesto"""
         dialog = AddLineDialog(self, db=self.db)
+        # Conectar señal de actualización de material
+        dialog.material_updated.connect(self.material_updated.emit)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             line_data = dialog.get_line_data()
             self.lineas_temp.append(line_data)
@@ -513,6 +645,8 @@ class QuoteEditor(QDialog):
 
         # Abrir diálogo de edición
         dialog = AddLineDialog(self, db=self.db, linea=linea_temp)
+        # Conectar señal de actualización de material
+        dialog.material_updated.connect(self.material_updated.emit)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             # Actualizar la línea
             new_data = dialog.get_line_data()
@@ -818,6 +952,7 @@ class QuotesManager(QWidget):
     """Widget para gestionar presupuestos"""
 
     quote_selected = pyqtSignal(object)
+    material_updated = pyqtSignal(int)  # Señal para propagar actualizaciones de materiales
 
     def __init__(self, db: Database, parent=None):
         super().__init__(parent)
@@ -908,6 +1043,8 @@ class QuotesManager(QWidget):
     def new_quote(self):
         """Crea un nuevo presupuesto"""
         dialog = QuoteEditor(self, db=self.db)
+        # Conectar señal de actualización de material
+        dialog.material_updated.connect(self.material_updated.emit)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             show_info(self, "Éxito", "Presupuesto creado correctamente")
             self.load_quotes()
@@ -926,6 +1063,8 @@ class QuotesManager(QWidget):
             return
 
         dialog = QuoteEditor(self, db=self.db, presupuesto=presupuesto)
+        # Conectar señal de actualización de material
+        dialog.material_updated.connect(self.material_updated.emit)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             show_info(self, "Éxito", "Presupuesto actualizado correctamente")
             self.load_quotes()
