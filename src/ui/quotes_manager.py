@@ -5,13 +5,13 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                               QTableWidget, QTableWidgetItem, QLineEdit, QLabel,
                               QHeaderView, QDialog, QFormLayout,
                               QTextEdit, QGroupBox, QDoubleSpinBox, QDateEdit,
-                              QComboBox, QSplitter, QSpinBox, QDialogButtonBox)
+                              QComboBox, QSplitter, QSpinBox, QDialogButtonBox, QScrollArea)
 from PyQt6.QtCore import Qt, pyqtSignal, QDate
 from datetime import datetime, date
 from src.database.database import (PresupuestoDAO, ClienteDAO, MaterialDAO,
                                    LineaPresupuesto, Database)
 from src.utils.helpers import (show_error, show_info, confirm_dialog,
-                               format_currency, format_date)
+                               format_currency, format_date, adjust_dialog_to_screen)
 from src.ui.clients_manager import ClientDialog
 from src.ui.materials_manager import MaterialDialog
 from src.templates.template_engine import TemplateEngine
@@ -47,9 +47,15 @@ class AddLineDialog(QDialog):
         """Inicializa la interfaz"""
         self.setWindowTitle("Añadir Línea" if not self.linea else "Editar Línea")
         self.setModal(True)
-        self.setMinimumWidth(600)
+        # Ajustar tamaño al monitor disponible con valores más pequeños
+        adjust_dialog_to_screen(self, preferred_width=650, preferred_height=600, min_width=500, min_height=400)
 
-        layout = QVBoxLayout()
+        # Layout principal
+        main_layout = QVBoxLayout()
+
+        # Widget de contenido scrollable
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
 
         # Grupo de búsqueda y filtros
         search_group = QGroupBox("Búsqueda de Material")
@@ -76,7 +82,7 @@ class AddLineDialog(QDialog):
         search_layout.addLayout(family_layout)
 
         search_group.setLayout(search_layout)
-        layout.addWidget(search_group)
+        content_layout.addWidget(search_group)
 
         form_layout = QFormLayout()
 
@@ -126,10 +132,10 @@ class AddLineDialog(QDialog):
         self.descripcion_input.setMaximumHeight(60)
         form_layout.addRow("Descripción (opcional):", self.descripcion_input)
 
-        layout.addLayout(form_layout)
+        content_layout.addLayout(form_layout)
 
         # Separador
-        layout.addWidget(QLabel("─" * 80))
+        content_layout.addWidget(QLabel("─" * 80))
 
         # Resumen de cálculos
         summary_group = QGroupBox("Resumen de Cálculos")
@@ -144,16 +150,23 @@ class AddLineDialog(QDialog):
         summary_layout.addRow("Precio Venta Total:", self.precio_venta_label)
 
         summary_group.setLayout(summary_layout)
-        layout.addWidget(summary_group)
+        content_layout.addWidget(summary_group)
 
-        # Botones
+        # Crear scroll area
+        scroll = QScrollArea()
+        scroll.setWidget(content_widget)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        main_layout.addWidget(scroll)
+
+        # Botones fuera del scroll area
         button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
                                        QDialogButtonBox.StandardButton.Cancel)
         button_box.accepted.connect(self.accept_dialog)
         button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
+        main_layout.addWidget(button_box)
 
-        self.setLayout(layout)
+        self.setLayout(main_layout)
 
     def load_materials(self):
         """Carga los materiales y las familias"""
@@ -421,9 +434,15 @@ class QuoteEditor(QDialog):
         """Inicializa la interfaz"""
         self.setWindowTitle("Nuevo Presupuesto" if not self.presupuesto else f"Editar Presupuesto")
         self.setModal(True)
-        self.resize(1000, 700)
+        # Ajustar tamaño al monitor disponible
+        adjust_dialog_to_screen(self, preferred_width=1000, preferred_height=700)
 
-        layout = QVBoxLayout()
+        # Layout principal del diálogo
+        main_layout = QVBoxLayout()
+
+        # Crear widget de contenido y hacer scrollable
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
 
         # Datos del presupuesto
         header_group = QGroupBox("Datos del Presupuesto")
@@ -483,7 +502,7 @@ class QuoteEditor(QDialog):
         header_layout.addRow("Descuento Global (%):", self.descuento_input)
 
         header_group.setLayout(header_layout)
-        layout.addWidget(header_group)
+        content_layout.addWidget(header_group)
 
         # Líneas del presupuesto
         lines_group = QGroupBox("Líneas de Materiales")
@@ -519,11 +538,12 @@ class QuoteEditor(QDialog):
         self.lines_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.lines_table.itemSelectionChanged.connect(self.on_line_selection_changed)
         self.lines_table.doubleClicked.connect(self.edit_line)
+        self.lines_table.setMinimumHeight(350)  # Altura mínima para que sea bien visible
 
         lines_layout.addWidget(self.lines_table)
 
         lines_group.setLayout(lines_layout)
-        layout.addWidget(lines_group)
+        content_layout.addWidget(lines_group)
 
         # Resumen de totales
         totals_group = QGroupBox("Resumen de Totales")
@@ -545,9 +565,16 @@ class QuoteEditor(QDialog):
         totals_layout.addRow("TOTAL FINAL:", self.total_final_label)
 
         totals_group.setLayout(totals_layout)
-        layout.addWidget(totals_group)
+        content_layout.addWidget(totals_group)
 
-        # Botones
+        # Crear scroll area para el contenido
+        scroll = QScrollArea()
+        scroll.setWidget(content_widget)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        main_layout.addWidget(scroll)
+
+        # Botones fuera del scroll area para que siempre sean visibles
         buttons_layout = QHBoxLayout()
 
         self.preview_button = QPushButton("👁️ Vista Previa")
@@ -562,9 +589,9 @@ class QuoteEditor(QDialog):
         button_box.rejected.connect(self.reject)
         buttons_layout.addWidget(button_box)
 
-        layout.addLayout(buttons_layout)
+        main_layout.addLayout(buttons_layout)
 
-        self.setLayout(layout)
+        self.setLayout(main_layout)
 
         # Cargar clientes
         self.load_clientes()

@@ -6,13 +6,13 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                               QHeaderView, QDialog, QFormLayout,
                               QTextEdit, QGroupBox, QDateEdit,
                               QComboBox, QDialogButtonBox, QDoubleSpinBox,
-                              QTabWidget)
+                              QTabWidget, QScrollArea)
 from PyQt6.QtCore import Qt, pyqtSignal, QDate
 from datetime import datetime, date
 from src.database.database import (ParteTrabajoDAO, PresupuestoDAO, TrabajadorDAO,
                                    MaterialDAO, DetalleManoObra, MaterialUsado, Database)
 from src.utils.helpers import (show_error, show_info, confirm_dialog,
-                               format_currency, format_date)
+                               format_currency, format_date, adjust_dialog_to_screen)
 from src.templates.template_engine import TemplateEngine
 from src.ui.document_viewer import DocumentViewer
 
@@ -35,9 +35,15 @@ class WorkReportEditor(QDialog):
         """Inicializa la interfaz"""
         self.setWindowTitle("Nuevo Parte de Trabajo" if not self.parte else "Editar Parte de Trabajo")
         self.setModal(True)
-        self.resize(1000, 700)
+        # Ajustar tamaño al monitor disponible
+        adjust_dialog_to_screen(self, preferred_width=1000, preferred_height=700)
 
-        layout = QVBoxLayout()
+        # Layout principal
+        main_layout = QVBoxLayout()
+
+        # Widget de contenido scrollable
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
 
         # Datos del parte
         header_group = QGroupBox("Datos del Parte de Trabajo")
@@ -78,7 +84,7 @@ class WorkReportEditor(QDialog):
         header_layout.addRow("Estado:", self.estado_combo)
 
         header_group.setLayout(header_layout)
-        layout.addWidget(header_group)
+        content_layout.addWidget(header_group)
 
         # Tabs para mano de obra y materiales
         tabs = QTabWidget()
@@ -108,6 +114,7 @@ class WorkReportEditor(QDialog):
         self.mano_obra_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.mano_obra_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.mano_obra_table.itemSelectionChanged.connect(self.on_mano_obra_selection_changed)
+        self.mano_obra_table.setMinimumHeight(300)  # Altura mínima para que sea bien visible
 
         mano_obra_layout.addWidget(self.mano_obra_table)
 
@@ -148,6 +155,7 @@ class WorkReportEditor(QDialog):
         self.materiales_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.materiales_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.materiales_table.itemSelectionChanged.connect(self.on_material_selection_changed)
+        self.materiales_table.setMinimumHeight(300)  # Altura mínima para que sea bien visible
 
         materiales_layout.addWidget(self.materiales_table)
 
@@ -163,7 +171,7 @@ class WorkReportEditor(QDialog):
         materiales_tab.setLayout(materiales_layout)
         tabs.addTab(materiales_tab, "Materiales Usados")
 
-        layout.addWidget(tabs)
+        content_layout.addWidget(tabs)
 
         # Resumen total
         total_layout = QHBoxLayout()
@@ -172,16 +180,23 @@ class WorkReportEditor(QDialog):
         self.total_parte_label = QLabel("0,00 €")
         self.total_parte_label.setStyleSheet("font-weight: bold; font-size: 14px;")
         total_layout.addWidget(self.total_parte_label)
-        layout.addLayout(total_layout)
+        content_layout.addLayout(total_layout)
 
-        # Botones
+        # Crear scroll area
+        scroll = QScrollArea()
+        scroll.setWidget(content_widget)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        main_layout.addWidget(scroll)
+
+        # Botones fuera del scroll area
         button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save |
                                        QDialogButtonBox.StandardButton.Cancel)
         button_box.accepted.connect(self.save_work_report)
         button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
+        main_layout.addWidget(button_box)
 
-        self.setLayout(layout)
+        self.setLayout(main_layout)
 
         # Cargar presupuestos
         self.load_presupuestos()
@@ -474,7 +489,8 @@ class AddManoObraDialog(QDialog):
         """Inicializa la interfaz"""
         self.setWindowTitle("Añadir Trabajo Realizado")
         self.setModal(True)
-        self.setMinimumWidth(500)
+        # Ajustar tamaño al monitor disponible
+        adjust_dialog_to_screen(self, preferred_width=550, preferred_height=450, min_width=450, min_height=350)
 
         layout = QFormLayout()
 
@@ -586,7 +602,8 @@ class AddMaterialUsadoDialog(QDialog):
         """Inicializa la interfaz"""
         self.setWindowTitle("Añadir Material Usado")
         self.setModal(True)
-        self.setMinimumWidth(500)
+        # Ajustar tamaño al monitor disponible
+        adjust_dialog_to_screen(self, preferred_width=550, preferred_height=400, min_width=450, min_height=300)
 
         layout = QFormLayout()
 

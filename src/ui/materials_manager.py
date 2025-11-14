@@ -4,10 +4,11 @@ Gestor de Materiales - Interfaz CRUD para gestión de materiales.
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                               QTableWidget, QTableWidgetItem, QLineEdit, QLabel,
                               QMessageBox, QHeaderView, QDialog, QFormLayout,
-                              QTextEdit, QGroupBox, QComboBox, QDoubleSpinBox)
+                              QTextEdit, QGroupBox, QComboBox, QDoubleSpinBox, QScrollArea)
 from PyQt6.QtCore import Qt, pyqtSignal
 from src.database.database import MaterialDAO, Database
-from src.utils.helpers import show_error, show_info, confirm_dialog, format_currency
+from src.utils.helpers import (show_error, show_info, confirm_dialog,
+                               format_currency, adjust_dialog_to_screen)
 
 
 class MaterialDialog(QDialog):
@@ -32,9 +33,15 @@ class MaterialDialog(QDialog):
         """Inicializa la interfaz"""
         self.setWindowTitle("Nuevo Material" if not self.material else "Editar Material")
         self.setModal(True)
-        self.setMinimumWidth(600)
+        # Ajustar tamaño al monitor disponible
+        adjust_dialog_to_screen(self, preferred_width=650, preferred_height=600, min_width=500, min_height=450)
 
-        layout = QVBoxLayout()
+        # Layout principal
+        main_layout = QVBoxLayout()
+
+        # Widget de contenido scrollable
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
 
         # Grupo de información básica
         basic_group = QGroupBox("Información Básica")
@@ -52,7 +59,7 @@ class MaterialDialog(QDialog):
         basic_layout.addRow("Proveedor:", self.proveedor_input)
 
         basic_group.setLayout(basic_layout)
-        layout.addWidget(basic_group)
+        content_layout.addWidget(basic_group)
 
         # Grupo de unidad y precios
         precio_group = QGroupBox("Unidad y Precios")
@@ -85,7 +92,7 @@ class MaterialDialog(QDialog):
         precio_layout.addRow("Precio Venta*:", self.precio_venta_input)
 
         precio_group.setLayout(precio_layout)
-        layout.addWidget(precio_group)
+        content_layout.addWidget(precio_group)
 
         # Grupo de stock
         stock_group = QGroupBox("Control de Stock (Opcional)")
@@ -103,7 +110,7 @@ class MaterialDialog(QDialog):
         stock_layout.addRow("Stock Mínimo:", self.stock_minimo_input)
 
         stock_group.setLayout(stock_layout)
-        layout.addWidget(stock_group)
+        content_layout.addWidget(stock_group)
 
         # Notas
         notas_group = QGroupBox("Notas")
@@ -112,9 +119,16 @@ class MaterialDialog(QDialog):
         self.notas_input.setMaximumHeight(60)
         notas_layout.addWidget(self.notas_input)
         notas_group.setLayout(notas_layout)
-        layout.addWidget(notas_group)
+        content_layout.addWidget(notas_group)
 
-        # Botones
+        # Crear scroll area
+        scroll = QScrollArea()
+        scroll.setWidget(content_widget)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        main_layout.addWidget(scroll)
+
+        # Botones fuera del scroll area
         buttons_layout = QHBoxLayout()
         buttons_layout.addStretch()
 
@@ -126,8 +140,8 @@ class MaterialDialog(QDialog):
         buttons_layout.addWidget(self.save_button)
         buttons_layout.addWidget(self.cancel_button)
 
-        layout.addLayout(buttons_layout)
-        self.setLayout(layout)
+        main_layout.addLayout(buttons_layout)
+        self.setLayout(main_layout)
 
     def calcular_precio_venta(self):
         """Calcula automáticamente el precio de venta basado en el precio de compra y el margen"""

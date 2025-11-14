@@ -4,10 +4,11 @@ Gestor de Clientes - Interfaz CRUD para gestión de clientes.
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                               QTableWidget, QTableWidgetItem, QLineEdit, QLabel,
                               QMessageBox, QHeaderView, QDialog, QFormLayout,
-                              QTextEdit, QGroupBox)
+                              QTextEdit, QGroupBox, QScrollArea)
 from PyQt6.QtCore import Qt, pyqtSignal
 from src.database.database import ClienteDAO, Database
-from src.utils.helpers import show_error, show_info, confirm_dialog, validate_nif_cif, validate_email, validate_phone
+from src.utils.helpers import (show_error, show_info, confirm_dialog, validate_nif_cif,
+                               validate_email, validate_phone, adjust_dialog_to_screen)
 
 
 class ClientDialog(QDialog):
@@ -26,9 +27,15 @@ class ClientDialog(QDialog):
         """Inicializa la interfaz"""
         self.setWindowTitle("Cliente" if not self.cliente else f"Editar Cliente")
         self.setModal(True)
-        self.setMinimumWidth(600)
+        # Ajustar tamaño al monitor disponible
+        adjust_dialog_to_screen(self, preferred_width=650, preferred_height=550, min_width=500, min_height=400)
 
-        layout = QVBoxLayout()
+        # Layout principal
+        main_layout = QVBoxLayout()
+
+        # Widget de contenido scrollable
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
 
         # Grupo de datos personales
         personal_group = QGroupBox("Datos Personales")
@@ -43,7 +50,7 @@ class ClientDialog(QDialog):
         personal_layout.addRow("NIF/CIF:", self.nif_input)
 
         personal_group.setLayout(personal_layout)
-        layout.addWidget(personal_group)
+        content_layout.addWidget(personal_group)
 
         # Grupo de datos empresa
         empresa_group = QGroupBox("Datos Empresa (Opcional)")
@@ -53,7 +60,7 @@ class ClientDialog(QDialog):
         empresa_layout.addRow("Empresa:", self.empresa_input)
 
         empresa_group.setLayout(empresa_layout)
-        layout.addWidget(empresa_group)
+        content_layout.addWidget(empresa_group)
 
         # Grupo de contacto
         contacto_group = QGroupBox("Contacto")
@@ -66,7 +73,7 @@ class ClientDialog(QDialog):
         contacto_layout.addRow("Email:", self.email_input)
 
         contacto_group.setLayout(contacto_layout)
-        layout.addWidget(contacto_group)
+        content_layout.addWidget(contacto_group)
 
         # Grupo de dirección
         direccion_group = QGroupBox("Dirección")
@@ -83,7 +90,7 @@ class ClientDialog(QDialog):
         direccion_layout.addRow("Provincia:", self.provincia_input)
 
         direccion_group.setLayout(direccion_layout)
-        layout.addWidget(direccion_group)
+        content_layout.addWidget(direccion_group)
 
         # Notas
         notas_group = QGroupBox("Notas")
@@ -92,9 +99,16 @@ class ClientDialog(QDialog):
         self.notas_input.setMaximumHeight(80)
         notas_layout.addWidget(self.notas_input)
         notas_group.setLayout(notas_layout)
-        layout.addWidget(notas_group)
+        content_layout.addWidget(notas_group)
 
-        # Botones
+        # Crear scroll area
+        scroll = QScrollArea()
+        scroll.setWidget(content_widget)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        main_layout.addWidget(scroll)
+
+        # Botones fuera del scroll area
         buttons_layout = QHBoxLayout()
         buttons_layout.addStretch()
 
@@ -106,8 +120,8 @@ class ClientDialog(QDialog):
         buttons_layout.addWidget(self.save_button)
         buttons_layout.addWidget(self.cancel_button)
 
-        layout.addLayout(buttons_layout)
-        self.setLayout(layout)
+        main_layout.addLayout(buttons_layout)
+        self.setLayout(main_layout)
 
     def load_data(self):
         """Carga los datos del cliente en el formulario"""

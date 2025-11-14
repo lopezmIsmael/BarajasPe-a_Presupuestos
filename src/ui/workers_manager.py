@@ -5,11 +5,12 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                               QTableWidget, QTableWidgetItem, QLineEdit, QLabel,
                               QMessageBox, QHeaderView, QDialog, QFormLayout,
                               QTextEdit, QGroupBox, QDoubleSpinBox, QDateEdit,
-                              QCheckBox)
+                              QCheckBox, QScrollArea)
 from PyQt6.QtCore import Qt, pyqtSignal, QDate
 from datetime import date
 from src.database.database import TrabajadorDAO, Database
-from src.utils.helpers import show_error, show_info, confirm_dialog, format_currency, format_date
+from src.utils.helpers import (show_error, show_info, confirm_dialog,
+                               format_currency, format_date, adjust_dialog_to_screen)
 
 
 class WorkerDialog(QDialog):
@@ -28,9 +29,15 @@ class WorkerDialog(QDialog):
         """Inicializa la interfaz"""
         self.setWindowTitle("Nuevo Trabajador" if not self.trabajador else "Editar Trabajador")
         self.setModal(True)
-        self.setMinimumWidth(600)
+        # Ajustar tamaño al monitor disponible
+        adjust_dialog_to_screen(self, preferred_width=650, preferred_height=600, min_width=500, min_height=450)
 
-        layout = QVBoxLayout()
+        # Layout principal
+        main_layout = QVBoxLayout()
+
+        # Widget de contenido scrollable
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
 
         # Grupo de datos personales
         personal_group = QGroupBox("Datos Personales")
@@ -45,7 +52,7 @@ class WorkerDialog(QDialog):
         personal_layout.addRow("DNI:", self.dni_input)
 
         personal_group.setLayout(personal_layout)
-        layout.addWidget(personal_group)
+        content_layout.addWidget(personal_group)
 
         # Grupo de contacto
         contacto_group = QGroupBox("Contacto")
@@ -60,7 +67,7 @@ class WorkerDialog(QDialog):
         contacto_layout.addRow("Dirección:", self.direccion_input)
 
         contacto_group.setLayout(contacto_layout)
-        layout.addWidget(contacto_group)
+        content_layout.addWidget(contacto_group)
 
         # Grupo de datos laborales
         laboral_group = QGroupBox("Datos Laborales")
@@ -88,7 +95,7 @@ class WorkerDialog(QDialog):
         laboral_layout.addRow("", self.activo_checkbox)
 
         laboral_group.setLayout(laboral_layout)
-        layout.addWidget(laboral_group)
+        content_layout.addWidget(laboral_group)
 
         # Notas
         notas_group = QGroupBox("Notas")
@@ -97,9 +104,16 @@ class WorkerDialog(QDialog):
         self.notas_input.setMaximumHeight(80)
         notas_layout.addWidget(self.notas_input)
         notas_group.setLayout(notas_layout)
-        layout.addWidget(notas_group)
+        content_layout.addWidget(notas_group)
 
-        # Botones
+        # Crear scroll area
+        scroll = QScrollArea()
+        scroll.setWidget(content_widget)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        main_layout.addWidget(scroll)
+
+        # Botones fuera del scroll area
         buttons_layout = QHBoxLayout()
         buttons_layout.addStretch()
 
@@ -111,8 +125,8 @@ class WorkerDialog(QDialog):
         buttons_layout.addWidget(self.save_button)
         buttons_layout.addWidget(self.cancel_button)
 
-        layout.addLayout(buttons_layout)
-        self.setLayout(layout)
+        main_layout.addLayout(buttons_layout)
+        self.setLayout(main_layout)
 
     def load_data(self):
         """Carga los datos del trabajador en el formulario"""

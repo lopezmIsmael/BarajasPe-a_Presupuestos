@@ -7,6 +7,7 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineSettings
 from PyQt6.QtCore import Qt, QUrl, QMarginsF
 from PyQt6.QtGui import QPageLayout, QPageSize, QAction
+from src.utils.helpers import adjust_dialog_to_screen
 import os
 
 
@@ -26,7 +27,8 @@ class DocumentViewer(QDialog):
     def init_ui(self, title):
         """Inicializa la interfaz"""
         self.setWindowTitle(title)
-        self.resize(1000, 800)
+        # Ajustar tamaño al monitor disponible
+        adjust_dialog_to_screen(self, preferred_width=1000, preferred_height=800)
 
         layout = QVBoxLayout()
 

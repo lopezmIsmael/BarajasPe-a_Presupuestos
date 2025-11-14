@@ -2,7 +2,8 @@
 Funciones auxiliares y utilidades comunes.
 """
 from datetime import datetime
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QMessageBox, QApplication
+from PyQt6.QtGui import QScreen
 
 
 def format_currency(amount):
@@ -210,3 +211,56 @@ def validate_phone(phone):
     # Validar que tenga entre 9 y 15 dígitos (con posible + al inicio)
     pattern = r'^\+?\d{9,15}$'
     return re.match(pattern, phone_clean) is not None
+
+
+def adjust_dialog_to_screen(dialog, preferred_width=1000, preferred_height=700,
+                            max_screen_ratio=0.9, min_width=600, min_height=400):
+    """
+    Ajusta el tamaño de un diálogo al tamaño de la pantalla disponible.
+
+    Args:
+        dialog: El diálogo QDialog a ajustar
+        preferred_width: Ancho preferido si la pantalla lo permite
+        preferred_height: Alto preferido si la pantalla lo permite
+        max_screen_ratio: Ratio máximo de pantalla a usar (0.9 = 90%)
+        min_width: Ancho mínimo del diálogo
+        min_height: Alto mínimo del diálogo
+    """
+    # Obtener la pantalla primaria o la del widget padre
+    screen = None
+
+    # Intentar obtener la pantalla del padre si existe
+    parent = dialog.parent()
+    if parent is not None:
+        screen = QApplication.screenAt(parent.pos())
+
+    # Si no hay padre o no se pudo obtener, usar pantalla primaria
+    if screen is None:
+        screen = QApplication.primaryScreen()
+
+    if screen is None:
+        # Si aún no hay pantalla, usar tamaño preferido
+        dialog.resize(preferred_width, preferred_height)
+        return
+
+    # Obtener geometría disponible (excluyendo barras de tareas, etc.)
+    available_geometry = screen.availableGeometry()
+    screen_width = available_geometry.width()
+    screen_height = available_geometry.height()
+
+    # Calcular tamaño máximo permitido
+    max_width = int(screen_width * max_screen_ratio)
+    max_height = int(screen_height * max_screen_ratio)
+
+    # Determinar tamaño final
+    final_width = max(min_width, min(preferred_width, max_width))
+    final_height = max(min_height, min(preferred_height, max_height))
+
+    # Aplicar tamaño
+    dialog.resize(final_width, final_height)
+
+    # Centrar el diálogo en la pantalla
+    dialog_geometry = dialog.frameGeometry()
+    center_point = available_geometry.center()
+    dialog_geometry.moveCenter(center_point)
+    dialog.move(dialog_geometry.topLeft())
