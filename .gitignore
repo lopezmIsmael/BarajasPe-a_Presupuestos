@@ -19,37 +19,34 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
 
 # Virtual environments
-myenv/
 venv/
 env/
 ENV/
+.venv
 
-# IDE
-.vscode/
+# PyCharm
 .idea/
-*.swp
-*.swo
+
+# VSCode
+.vscode/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# PyInstaller
+*.spec
+
+# Logs
+*.log
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Database
-data.db
-*.db-journal
-
-# Logs
-*.log
-
-# Backup files
-*_backup.py
-*_old.py
-*.bak
-*.orig
-
-# Temporary files
-*.tmp
-*.temp
+# Application specific
+constructora.db
+myenv/

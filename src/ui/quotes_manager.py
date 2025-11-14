@@ -1,1481 +1,1179 @@
 """
-Gestión de presupuestos - Interface y lógica
+Gestor de Presupuestos - Interfaz para gestión completa de presupuestos.
 """
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog
-from src.database import db
-from src.pdf.generator import export_quote_to_pdf, export_document_to_pdf
-from src.pdf.preview import generate_quote_preview
-from src.ui.wysiwyg_editor import PDFStyleEditor
-from src.pdf.document_preview import generate_document_preview
-from src.config.settings import QUOTE_EDITOR_SIZE, QUOTE_VIEWER_SIZE, PDF_FILETYPES
-from src.ui.ui_utils import (
-    center_window, create_styled_button, create_search_frame,
-    create_treeview_with_scrollbar, create_button_frame,
-    bind_keyboard_shortcuts
-)
-from src.ui.materials_manager import MaterialEditor
-from src.ui.clients_manager import ClientEditor
-from PIL import Image, ImageTk
-from datetime import datetime
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+                              QTableWidget, QTableWidgetItem, QLineEdit, QLabel,
+                              QHeaderView, QDialog, QFormLayout,
+                              QTextEdit, QGroupBox, QDoubleSpinBox, QDateEdit,
+                              QComboBox, QSplitter, QSpinBox, QDialogButtonBox, QScrollArea)
+from PyQt6.QtCore import Qt, pyqtSignal, QDate
+from datetime import datetime, date
+from src.database.database import (PresupuestoDAO, ClienteDAO, MaterialDAO,
+                                   LineaPresupuesto, Database)
+from src.utils.helpers import (show_error, show_info, confirm_dialog,
+                               format_currency, format_date, adjust_dialog_to_screen)
+from src.ui.clients_manager import ClientDialog
+from src.ui.materials_manager import MaterialDialog
+from src.templates.template_engine import TemplateEngine
+from src.ui.document_viewer import DocumentViewer
 
 
-def format_price_es(value):
-    """
-    Formatea un precio en formato español:
-    - Punto como separador de miles
-    - Coma como separador decimal
-    """
-    return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+class AddLineDialog(QDialog):
+    """Diálogo para añadir una línea al presupuesto"""
 
+    material_updated = pyqtSignal(int)  # Señal que emite el ID del material actualizado
 
-class QuotesFrame(ttk.Frame):
-    """Frame principal para la gestión de presupuestos"""
-    
-    def __init__(self, master, app):
-        super().__init__(master)
-        self.app = app
-        self._setup_ui()
-        self.refresh()
-    
-    def _setup_ui(self):
-        """Configura la interfaz de usuario"""
-        # Barra de búsqueda
-        self.search_var = tk.StringVar()
-        self.search_var.trace('w', lambda *args: self.refresh())
-        search_frame, search_entry = create_search_frame(self, self.search_var)
-        
-        # Tabla de presupuestos
-        columns = ('id', 'work_name', 'client', 'date', 'total')
-        headings = ('#', 'Obra', 'Cliente', 'Fecha', 'Total (€)')
-        column_widths = (50, 250, 200, 100, 100)
-        
-        tree_frame, self.tree = create_treeview_with_scrollbar(
-            self, columns, headings, column_widths
-        )
-        
-        # Doble click para exportar PDF
-        self.tree.bind('<Double-Button-1>', lambda e: self.export_pdf())
-        
-        # Botones de acción
-        buttons_config = [
-            ('✏️ Editar', self.edit_quote, 'info'),
-            ('🗑️ Eliminar', self.delete_quote, 'danger'),
-            ('📄 Exportar PDF', self.export_pdf, 'primary'),
-            ('👁️ Ver Detalles', self.view_details, 'secondary')
-        ]
-        
-        btn_frame, self.buttons = create_button_frame(self, buttons_config)
-    
-    def refresh(self):
-        """Actualiza la lista de presupuestos"""
-        # Limpiar items existentes
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-        
-        # Filtrar presupuestos
-        search_term = self.search_var.get().lower()
-        quotes = db.list_quotes()
-        
-        row_count = 0
-        for quote in quotes:
-            # Obtener work_name de forma segura
-            try:
-                work_name = quote['work_name'] or ''
-            except (KeyError, IndexError):
-                work_name = ''
-            
-            # Aplicar filtro de búsqueda
-            if search_term:
-                client_name = quote['client_name'] or ''
-                if search_term not in client_name.lower() and search_term not in work_name.lower():
-                    continue
-            
-            # Calcular total
-            _, items = db.get_quote(quote['id'])
-            total = sum(item['unit_price'] * item['quantity'] for item in items)
-            total += quote['labor_cost'] or 0
-            
-            # Alternar colores de filas
-            tag = 'evenrow' if row_count % 2 == 0 else 'oddrow'
-            
-            # Añadir item al árbol
-            self.tree.insert('', 'end', iid=str(quote['id']), values=(
-                quote['id'],
-                work_name or 'Sin nombre',
-                quote['client_name'] or '',
-                quote['date'],
-                format_price_es(total)
-            ), tags=(tag,))
-            
-            row_count += 1
-    
-    def new_quote(self):
-        """Abre el editor para crear un nuevo presupuesto"""
-        QuoteEditor(self, quote_id=None, on_save=self.refresh)
-    
-    def edit_quote(self):
-        """Abre el editor para editar el presupuesto seleccionado"""
-        selected = self.tree.selection()
-        if not selected:
-            messagebox.showwarning('Atención', 'Selecciona un presupuesto para editar')
-            return
-        
-        quote_id = int(selected[0])
-        QuoteEditor(self, quote_id=quote_id, on_save=self.refresh)
-    
-    def delete_quote(self):
-        """Elimina el presupuesto seleccionado"""
-        selected = self.tree.selection()
-        if not selected:
-            messagebox.showwarning('Atención', 'Selecciona un presupuesto para eliminar')
-            return
-        
-        quote_id = int(selected[0])
-        confirm_msg = f'¿Eliminar el presupuesto #{quote_id}?\\n\\nEsta acción no se puede deshacer.'
-        
-        if messagebox.askyesno('Confirmar', confirm_msg):
-            try:
-                db.delete_quote(quote_id)
-                self.refresh()
-                messagebox.showinfo('Éxito', 'Presupuesto eliminado correctamente')
-            except Exception as e:
-                messagebox.showerror('Error', f'Error al eliminar: {str(e)}')
-    
-    def export_pdf(self):
-        """Exporta el presupuesto seleccionado a PDF"""
-        selected = self.tree.selection()
-        if not selected:
-            messagebox.showwarning('Atención', 'Selecciona un presupuesto')
-            return
-        
-        quote_id = int(selected[0])
-        default_name = f"presupuesto_{quote_id}.pdf"
-        
-        file_path = filedialog.asksaveasfilename(
-            defaultextension='.pdf',
-            initialfile=default_name,
-            filetypes=PDF_FILETYPES
-        )
-        
-        if not file_path:
-            return
-        
+    def __init__(self, parent=None, db=None, linea=None):
+        super().__init__(parent)
+        self.db = db
+        self.linea = linea
+        self.materiales = []
+        self._updating_prices = False  # Flag para evitar loops infinitos
+        self.init_ui()
+
+        # Conectar señales ANTES de cargar materiales
+        self.cantidad_input.valueChanged.connect(self.calcular_totales)
+        self.precio_compra_input.valueChanged.connect(self.on_precio_compra_changed)
+        self.margen_input.valueChanged.connect(self.on_margen_changed)
+        self.precio_venta_unitario_input.valueChanged.connect(self.on_precio_venta_changed)
+        self.material_combo.currentIndexChanged.connect(self.on_material_changed)
+
+        self.load_materials()
+
+        if linea:
+            self.load_line_data()
+
+    def init_ui(self):
+        """Inicializa la interfaz"""
+        self.setWindowTitle("Añadir Línea" if not self.linea else "Editar Línea")
+        self.setModal(True)
+        # Ajustar tamaño al monitor disponible con valores más pequeños
+        adjust_dialog_to_screen(self, preferred_width=650, preferred_height=600, min_width=500, min_height=400)
+
+        # Layout principal
+        main_layout = QVBoxLayout()
+
+        # Widget de contenido scrollable
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+
+        # Grupo de búsqueda y filtros
+        search_group = QGroupBox("Búsqueda de Material")
+        search_layout = QVBoxLayout()
+
+        # Búsqueda por nombre
+        search_name_layout = QHBoxLayout()
+        search_label = QLabel("Buscar:")
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Escribe para buscar por nombre...")
+        self.search_input.textChanged.connect(self.filter_materials)
+        search_name_layout.addWidget(search_label)
+        search_name_layout.addWidget(self.search_input)
+        search_layout.addLayout(search_name_layout)
+
+        # Filtro por familia
+        family_layout = QHBoxLayout()
+        family_label = QLabel("Familia:")
+        self.family_combo = QComboBox()
+        self.family_combo.addItem("Todas las familias", "")
+        self.family_combo.currentTextChanged.connect(self.filter_materials)
+        family_layout.addWidget(family_label)
+        family_layout.addWidget(self.family_combo)
+        search_layout.addLayout(family_layout)
+
+        search_group.setLayout(search_layout)
+        content_layout.addWidget(search_group)
+
+        form_layout = QFormLayout()
+
+        # Material
+        material_layout = QHBoxLayout()
+        self.material_combo = QComboBox()
+        self.material_combo.setMinimumWidth(400)
+        self.new_material_btn = QPushButton("+ Nuevo")
+        self.new_material_btn.clicked.connect(self.new_material)
+        material_layout.addWidget(self.material_combo)
+        material_layout.addWidget(self.new_material_btn)
+        form_layout.addRow("Material*:", material_layout)
+
+        # Cantidad
+        self.cantidad_input = QDoubleSpinBox()
+        self.cantidad_input.setRange(0.01, 999999.99)
+        self.cantidad_input.setDecimals(2)
+        self.cantidad_input.setValue(1.0)
+        form_layout.addRow("Cantidad*:", self.cantidad_input)
+
+        # Precio de compra unitario (auto-rellenado desde material)
+        self.precio_compra_input = QDoubleSpinBox()
+        self.precio_compra_input.setRange(0, 999999.99)
+        self.precio_compra_input.setDecimals(2)
+        self.precio_compra_input.setSuffix(" €")
+        self.precio_compra_input.setGroupSeparatorShown(True)
+        form_layout.addRow("Precio Compra Unit.:", self.precio_compra_input)
+
+        # Margen de ganancia
+        self.margen_input = QDoubleSpinBox()
+        self.margen_input.setRange(0, 1000)
+        self.margen_input.setDecimals(2)
+        self.margen_input.setSuffix(" %")
+        self.margen_input.setValue(20.0)
+        form_layout.addRow("Margen Ganancia (%):", self.margen_input)
+
+        # Precio de venta unitario
+        self.precio_venta_unitario_input = QDoubleSpinBox()
+        self.precio_venta_unitario_input.setRange(0, 999999.99)
+        self.precio_venta_unitario_input.setDecimals(2)
+        self.precio_venta_unitario_input.setSuffix(" €")
+        self.precio_venta_unitario_input.setGroupSeparatorShown(True)
+        form_layout.addRow("Precio Venta Unit.:", self.precio_venta_unitario_input)
+
+        # Descripción personalizada
+        self.descripcion_input = QTextEdit()
+        self.descripcion_input.setMaximumHeight(60)
+        form_layout.addRow("Descripción (opcional):", self.descripcion_input)
+
+        content_layout.addLayout(form_layout)
+
+        # Separador
+        content_layout.addWidget(QLabel("─" * 80))
+
+        # Resumen de cálculos
+        summary_group = QGroupBox("Resumen de Cálculos")
+        summary_layout = QFormLayout()
+
+        self.coste_total_label = QLabel("0,00 €")
+        self.ganancia_label = QLabel("0,00 €")
+        self.precio_venta_label = QLabel("0,00 €")
+
+        summary_layout.addRow("Coste Total:", self.coste_total_label)
+        summary_layout.addRow("Ganancia:", self.ganancia_label)
+        summary_layout.addRow("Precio Venta Total:", self.precio_venta_label)
+
+        summary_group.setLayout(summary_layout)
+        content_layout.addWidget(summary_group)
+
+        # Crear scroll area
+        scroll = QScrollArea()
+        scroll.setWidget(content_widget)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        main_layout.addWidget(scroll)
+
+        # Botones fuera del scroll area
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                                       QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept_dialog)
+        button_box.rejected.connect(self.reject)
+        main_layout.addWidget(button_box)
+
+        self.setLayout(main_layout)
+
+    def load_materials(self):
+        """Carga los materiales y las familias"""
         try:
-            # SIEMPRE usar export_quote_to_pdf que tiene el formato correcto
-            # (datos a la derecha, negritas, subrayado, centrado, etc.)
-            export_quote_to_pdf(quote_id, file_path)
-            
-            messagebox.showinfo('Éxito', f'PDF exportado:\n{file_path}')
+            dao = MaterialDAO(self.db)
+            self.materiales = dao.obtener_todos()
+
+            # Cargar familias únicas
+            familias = set()
+            for material in self.materiales:
+                if material.familia:
+                    familias.add(material.familia)
+
+            # Poblar combo de familias
+            self.family_combo.clear()
+            self.family_combo.addItem("Todas las familias", "")
+            for familia in sorted(familias):
+                self.family_combo.addItem(familia, familia)
+
+            # Cargar materiales en el combo
+            self.filter_materials()
+
         except Exception as e:
-            messagebox.showerror('Error', f'Error al exportar: {str(e)}')
-    
-    def view_details(self):
-        """Muestra los detalles del presupuesto seleccionado"""
-        selected = self.tree.selection()
-        if not selected:
-            messagebox.showwarning('Atención', 'Selecciona un presupuesto')
+            show_error(self, "Error", f"Error al cargar materiales: {str(e)}")
+
+    def filter_materials(self):
+        """Filtra los materiales según búsqueda y familia"""
+        search_text = self.search_input.text().lower() if hasattr(self, 'search_input') else ""
+        selected_family = self.family_combo.currentData() if hasattr(self, 'family_combo') else ""
+
+        self.material_combo.clear()
+
+        for material in self.materiales:
+            # Filtrar por familia
+            if selected_family and material.familia != selected_family:
+                continue
+
+            # Filtrar por búsqueda de texto
+            if search_text and search_text not in material.nombre.lower():
+                continue
+
+            # Añadir al combo
+            familia_tag = f"[{material.familia}] " if material.familia else ""
+            self.material_combo.addItem(
+                f"{familia_tag}{material.nombre} ({material.unidad}) - {format_currency(material.precio_compra)}",
+                material.id
+            )
+
+        # Si hay resultados, seleccionar el primero
+        if self.material_combo.count() > 0:
+            self.material_combo.setCurrentIndex(0)
+
+    def on_material_changed(self, index):
+        """Cuando se selecciona un material, auto-rellena los datos"""
+        if index < 0:
             return
-        
-        quote_id = int(selected[0])
-        QuoteViewer(self, quote_id)
 
+        material_id = self.material_combo.currentData()
+        if not material_id:
+            return
 
-class QuoteViewer(tk.Toplevel):
-    """Visor de detalles de presupuesto - Ventana modal"""
-    
-    def __init__(self, master, quote_id):
-        super().__init__(master)
-        self.quote_id = quote_id
-        
-        self._setup_window()
-        self._setup_ui()
-    
-    def _setup_window(self):
-        """Configura la ventana"""
-        self.title(f'Presupuesto #{self.quote_id}')
-        
-        width, height = map(int, QUOTE_VIEWER_SIZE.split('x'))
-        center_window(self, width, height)
-        
-        # Configurar tamaño mínimo (85% del tamaño original)
-        self.minsize(int(width * 0.85), int(height * 0.85))
-        
-        # Hacer la ventana redimensionable
-        self.resizable(True, True)
-        
-        # Modal
-        self.transient(self.master)
-    
-    def _setup_ui(self):
-        """Configura la interfaz de usuario"""
-        # Obtener datos del presupuesto
-        quote, items = db.get_quote(self.quote_id)
-        
-        # Header con información del presupuesto
-        self._create_header(quote)
-        
-        # Lista de items
-        self._create_items_section(items)
-        
-        # Resumen de totales
-        self._create_totals_section(quote, items)
-        
-        # Botón cerrar
-        ttk.Button(self, text='Cerrar', command=self.destroy).pack(pady=10)
-    
-    def _create_header(self, quote):
-        """Crea la sección del header con información del presupuesto"""
-        header = ttk.Frame(self, padding=20)
-        header.pack(fill='x')
-        
-        ttk.Label(header, text=f"Presupuesto #{quote['id']}", 
-                 font=('Helvetica', 16, 'bold')).pack(anchor='w')
-        
-        # Mostrar nombre de obra si existe
+        # Buscar el material por ID
+        material = next((m for m in self.materiales if m.id == material_id), None)
+        if not material:
+            return
+
+        # Bloquear actualizaciones automáticas mientras cargamos los datos
+        self._updating_prices = True
         try:
-            work_name = quote['work_name']
-            if work_name:
-                ttk.Label(header, text=f"Obra: {work_name}", 
-                         font=('Helvetica', 12, 'bold'), 
-                         foreground='#2B7DE9').pack(anchor='w', pady=(5, 0))
-        except (KeyError, IndexError):
-            pass
-        
-        ttk.Label(header, text=f"Fecha: {quote['date']}").pack(anchor='w')
-        ttk.Label(header, text=f"Cliente: {quote['client_name'] or 'N/A'}").pack(anchor='w')
-        
-        if quote['client_address']:
-            ttk.Label(header, text=f"Dirección: {quote['client_address']}").pack(anchor='w')
-        
-        if quote['client_dni']:
-            ttk.Label(header, text=f"DNI: {quote['client_dni']}").pack(anchor='w')
-    
-    def _create_items_section(self, items):
-        """Crea la sección de items del presupuesto"""
-        items_frame = ttk.LabelFrame(self, text='Items', padding=10)
-        items_frame.pack(fill='both', expand=True, padx=20, pady=10)
-        
-        # Frame con borde visible
-        border_canvas = tk.Canvas(items_frame, highlightthickness=3,
-                                 highlightbackground='#2B7DE9',
-                                 highlightcolor='#2B7DE9',
-                                 background='#FFFFFF')
-        border_canvas.pack(fill='both', expand=True)
-        
-        tree_container = ttk.Frame(border_canvas)
-        tree_container.pack(fill='both', expand=True, padx=2, pady=2)
-        
-        # Configurar treeview para items con columnas incluyendo beneficio y margen
-        columns = ('name', 'qty', 'supplier_price', 'price', 'benefit', 'margin', 'total')
-        tree = ttk.Treeview(tree_container, columns=columns, show='headings', height=10)
-        
-        tree.heading('name', text='Material', anchor='w')
-        tree.heading('qty', text='Cantidad', anchor='center')
-        tree.heading('supplier_price', text='P. Proveedor', anchor='e')
-        tree.heading('price', text='PVP', anchor='e')
-        tree.heading('benefit', text='Beneficio', anchor='e')
-        tree.heading('margin', text='Margen %', anchor='center')
-        tree.heading('total', text='Total', anchor='e')
-        
-        tree.column('name', width=200, anchor='w')
-        tree.column('qty', width=85, anchor='center')
-        tree.column('supplier_price', width=110, anchor='e')
-        tree.column('price', width=95, anchor='e')
-        tree.column('benefit', width=95, anchor='e')
-        tree.column('margin', width=90, anchor='center')
-        tree.column('total', width=110, anchor='e')
-        
-        # Configurar tags para filas alternadas con mejor contraste
-        tree.tag_configure('oddrow', background='#FFFFFF')
-        tree.tag_configure('evenrow', background='#F0F4F8')
-        
-        tree.pack(fill='both', expand=True)
-        
-        # Cargar items con filas alternadas
-        for i, item in enumerate(items):
-            line_total = item['unit_price'] * item['quantity']
-            tag = 'evenrow' if i % 2 == 0 else 'oddrow'
-            
-            # Obtener precio de proveedor (sqlite3.Row no tiene .get())
-            try:
-                supplier_price = item['supplier_price'] or 0
-            except (KeyError, IndexError):
-                supplier_price = 0
-            
-            sale_price = item['unit_price']
-            
-            # Calcular beneficio y margen
-            benefit = sale_price - supplier_price
-            margin = ((benefit / sale_price) * 100) if sale_price > 0 else 0
-            
-            tree.insert('', 'end', values=(
-                item['name'],
-                item['quantity'],
-                format_price_es(supplier_price),
-                format_price_es(sale_price),
-                format_price_es(benefit),
-                f"{margin:.1f}%",
-                format_price_es(line_total)
-            ), tags=(tag,))
-    
-    def _create_totals_section(self, quote, items):
-        """Crea la sección de totales"""
-        totals_frame = ttk.Frame(self, padding=20)
-        totals_frame.pack(fill='x')
-        
-        # Calcular totales
-        subtotal = sum(item['unit_price'] * item['quantity'] for item in items)
-        labor_cost = quote['labor_cost'] or 0
-        total = subtotal + labor_cost
-        
-        # Calcular beneficio total de materiales
-        total_cost = 0
-        for item in items:
-            try:
-                supplier_price = item['supplier_price'] or 0
-            except (KeyError, IndexError):
-                supplier_price = 0
-            total_cost += supplier_price * item['quantity']
-        
-        total_benefit = subtotal - total_cost
-        overall_margin = ((total_benefit / subtotal) * 100) if subtotal > 0 else 0
-        
-        # Mostrar totales
-        ttk.Label(totals_frame, text=f"Coste materiales (proveedor): {format_price_es(total_cost)} €", 
-                 font=('Helvetica', 10), foreground='gray').pack(anchor='e')
-        ttk.Label(totals_frame, text=f"Subtotal materiales (venta): {format_price_es(subtotal)} €", 
-                 font=('Helvetica', 11)).pack(anchor='e')
-        ttk.Label(totals_frame, text=f"Beneficio materiales: {format_price_es(total_benefit)} € ({overall_margin:.1f}%)", 
-                 font=('Helvetica', 11), foreground='green').pack(anchor='e', pady=(0, 10))
-        ttk.Label(totals_frame, text=f"Mano de obra: {format_price_es(labor_cost)} €", 
-                 font=('Helvetica', 11)).pack(anchor='e')
-        ttk.Label(totals_frame, text=f"TOTAL: {format_price_es(total)} €", 
-                 font=('Helvetica', 14, 'bold')).pack(anchor='e')
+            # Establecer precio de compra del material
+            self.precio_compra_input.setValue(material.precio_compra if material.precio_compra else 0.0)
 
-
-class QuoteEditor(tk.Toplevel):
-    """Editor de presupuestos - Ventana modal"""
-    
-    def __init__(self, master, quote_id=None, on_save=None):
-        super().__init__(master)
-        print(f"DEBUG QuoteEditor.__init__: quote_id={quote_id}")
-        self.quote_id = quote_id
-        self.on_save = on_save
-        self.items_data = []  # Lista de items del presupuesto
-        self.preview_photo = None  # Para evitar garbage collection
-        self.preview_update_job = None  # Para debouncing de updates
-        self.document_update_job = None  # Para debouncing de regeneración de documento
-        self.document_needs_save = False  # Flag para indicar si el documento ha cambiado
-        
-        self._setup_window()
-        self._setup_ui()
-        self._load_data()
-        self._setup_keyboard_shortcuts()
-        
-        # Generar el documento inicial
-        self.update_idletasks()
-        self.after(100, self._regenerate_document)
-        
-        # Establecer grab después de que la ventana esté completamente visible
-        self.after(200, self.grab_set)
-        
-        print("DEBUG: QuoteEditor inicializado completamente")
-    
-    def _setup_window(self):
-        """Configura la ventana"""
-        title = 'Editar Presupuesto' if self.quote_id else 'Nuevo Presupuesto'
-        self.title(title)
-        
-        # Configurar como modal primero
-        self.transient(self.master)
-        
-        # Hacer la ventana redimensionable
-        self.resizable(True, True)
-        
-        # Obtener tamaño de la pantalla y maximizar
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-        
-        # Configurar geometría para ocupar toda la pantalla
-        self.geometry(f"{screen_width}x{screen_height}+0+0")
-        
-        # Intentar maximizar usando diferentes métodos según el sistema
-        try:
-            # Para algunos gestores de ventanas en Linux
-            self.attributes('-zoomed', True)
-        except:
-            pass
-        
-        try:
-            # Método alternativo
-            self.state('zoomed')
-        except:
-            pass
-    
-    def _setup_ui(self):
-        """Configura la interfaz de usuario"""
-        # Contenedor principal con grid
-        main_container = ttk.Frame(self)
-        main_container.grid(row=0, column=0, sticky='nsew', padx=0, pady=0)
-        
-        # Configurar peso de filas y columnas para redimensionamiento
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=1)
-        
-        main_container.grid_rowconfigure(0, weight=1)
-        main_container.grid_columnconfigure(0, weight=0)  # Panel izquierdo (datos + items) - tamaño fijo
-        main_container.grid_columnconfigure(1, weight=2)  # Panel derecho (documento + preview) - más espacio
-        
-        # Panel izquierdo - Datos y items
-        left_container = ttk.Frame(main_container)
-        left_container.grid(row=0, column=0, sticky='nsew', padx=(10, 5), pady=10)
-        left_container.grid_rowconfigure(0, weight=0)  # Datos básicos
-        left_container.grid_rowconfigure(1, weight=1)  # Items
-        left_container.grid_columnconfigure(0, weight=1)
-        
-        # Sub-panel: datos básicos
-        self._create_left_panel(left_container)
-        
-        # Sub-panel: items del presupuesto
-        self._create_center_panel(left_container)
-        
-        # Panel derecho - Documento editable y preview
-        self._create_document_and_preview_panel(main_container)
-        
-        # Botones principales en la parte inferior
-        self._create_bottom_buttons()
-    
-    def _create_left_panel(self, parent):
-        """Crea el panel con datos básicos del presupuesto"""
-        left_panel = ttk.Frame(parent, padding=10)
-        left_panel.grid(row=0, column=0, sticky='nsew')
-        
-        # Configurar expansión de filas
-        left_panel.grid_rowconfigure(4, weight=1)  # La sección de materiales se expande
-        
-        # Sección cliente
-        self._create_client_section(left_panel)
-        
-        # Sección nombre de obra
-        self._create_work_name_section(left_panel)
-        
-        # Sección mano de obra
-        self._create_labor_section(left_panel)
-        
-        # Sección búsqueda de materiales (expande para llenar espacio)
-        self._create_material_search_section(left_panel)
-        
-        # Sección nombre de obra
-        self._create_work_name_section(left_panel)
-        
-        # Sección mano de obra
-        self._create_labor_section(left_panel)
-        
-        # Sección búsqueda de materiales (expande para llenar espacio)
-        self._create_material_search_section(left_panel)
-    
-    def _create_client_section(self, parent):
-        """Crea la sección de selección de cliente con búsqueda"""
-        client_frame = ttk.LabelFrame(parent, text='👤 Cliente', padding=12)
-        client_frame.grid(row=0, column=0, sticky='ew', pady=(0, 10))
-        
-        # Cargar lista de clientes
-        self.clients_list = db.list_clients()
-        self.filtered_clients = self.clients_list.copy()
-        self.selected_client = None
-        
-        # Campo de búsqueda de cliente
-        self.client_search_var = tk.StringVar()
-        self.client_search_var.trace('w', lambda *args: self._filter_clients())
-        
-        search_container = ttk.Frame(client_frame)
-        search_container.pack(fill='x', pady=(0, 8))
-        
-        # Búsqueda con icono
-        search_label = ttk.Label(search_container, text='🔍', font=('Helvetica', 11))
-        search_label.pack(side='left', padx=(0, 5))
-        
-        self.client_entry = ttk.Entry(search_container, textvariable=self.client_search_var, 
-                                      font=('Helvetica', 10))
-        self.client_entry.pack(side='left', fill='x', expand=True, padx=(0, 5))
-        
-        # Botón para añadir nuevo cliente
-        new_client_btn = create_styled_button(
-            search_container, '+ Nuevo', self._quick_add_client, 'success'
-        )
-        new_client_btn.pack(side='left')
-        
-        # Lista de resultados de clientes (compacta y elegante)
-        list_frame = ttk.Frame(client_frame)
-        list_frame.pack(fill='both', expand=False)
-        
-        self.client_listbox = tk.Listbox(list_frame, height=3, font=('Helvetica', 9),
-                                         relief='solid', borderwidth=1,
-                                         selectmode='single', activestyle='none')
-        self.client_listbox.pack(side='left', fill='both', expand=True)
-        
-        client_scrollbar = ttk.Scrollbar(list_frame, orient='vertical', 
-                                        command=self.client_listbox.yview)
-        self.client_listbox.configure(yscrollcommand=client_scrollbar.set)
-        client_scrollbar.pack(side='right', fill='y')
-        
-        # Doble click o Enter para seleccionar
-        self.client_listbox.bind('<Double-Button-1>', lambda e: self._select_client())
-        self.client_listbox.bind('<Return>', lambda e: self._select_client())
-        
-        # Mostrar todos los clientes inicialmente
-        self._show_all_clients()
-    
-    def _create_work_name_section(self, parent):
-        """Crea la sección de nombre de obra"""
-        work_frame = ttk.LabelFrame(parent, text='🏗️ Nombre de Obra', padding=12)
-        work_frame.grid(row=1, column=0, sticky='ew', pady=(0, 10))
-        
-        self.work_name_entry = ttk.Entry(work_frame, font=('Helvetica', 10))
-        self.work_name_entry.pack(fill='x')
-        self.work_name_entry.bind('<KeyRelease>', lambda e: self._schedule_document_update())
-    
-    def _create_labor_section(self, parent):
-        """Crea la sección de mano de obra"""
-        labor_frame = ttk.LabelFrame(parent, text='💰 Mano de obra', padding=12)
-        labor_frame.grid(row=2, column=0, sticky='ew', pady=(0, 10))
-        
-        # Frame horizontal para label y entry
-        labor_container = ttk.Frame(labor_frame)
-        labor_container.pack(fill='x')
-        
-        ttk.Label(labor_container, text='Coste:', font=('Helvetica', 10)).pack(side='left', padx=(0, 5))
-        
-        self.labor_entry = ttk.Entry(labor_container, font=('Helvetica', 10), width=15)
-        self.labor_entry.insert(0, '0')
-        self.labor_entry.pack(side='left', padx=(0, 5))
-        
-        ttk.Label(labor_container, text='€', font=('Helvetica', 10, 'bold')).pack(side='left')
-        
-        # Actualizar totales y documento cuando cambie
-        def on_labor_change(e):
-            self._update_totals()
-            self._schedule_document_update()
-        self.labor_entry.bind('<KeyRelease>', on_labor_change)
-    
-    def _create_material_search_section(self, parent):
-        """Crea la sección de búsqueda y adición de materiales"""
-        mat_frame = ttk.LabelFrame(parent, text='📦 Buscar y añadir material', padding=12)
-        mat_frame.grid(row=4, column=0, sticky='nsew', pady=(0, 0))
-        
-        # Configurar para que se expanda verticalmente
-        parent.grid_rowconfigure(4, weight=1)
-        
-        # Campo de búsqueda con icono
-        search_container = ttk.Frame(mat_frame)
-        search_container.pack(fill='x', pady=(0, 8))
-        
-        ttk.Label(search_container, text='🔍', font=('Helvetica', 12)).pack(side='left', padx=(0, 5))
-        
-        self.mat_search_var = tk.StringVar()
-        self.mat_search_var.trace('w', lambda *args: self._filter_materials())
-        
-        search_entry = ttk.Entry(search_container, textvariable=self.mat_search_var, 
-                                font=('Helvetica', 10))
-        search_entry.pack(side='left', fill='x', expand=True)
-        
-        # Lista de resultados (más compacta)
-        self._create_material_results_list(mat_frame)
-        
-        # Botones de acción (más compactos)
-        self._create_material_action_buttons(mat_frame)
-    
-    def _create_material_results_list(self, parent):
-        """Crea la lista de resultados de materiales"""
-        results_frame = ttk.Frame(parent)
-        results_frame.pack(fill='both', expand=True, pady=(0, 8))
-        
-        scrollbar = ttk.Scrollbar(results_frame)
-        scrollbar.pack(side='right', fill='y')
-        
-        self.mat_listbox = tk.Listbox(
-            results_frame, height=8, yscrollcommand=scrollbar.set,
-            font=('Helvetica', 9), relief='solid', borderwidth=1
-        )
-        self.mat_listbox.pack(fill='both', expand=True)
-        scrollbar.config(command=self.mat_listbox.yview)
-        
-        # Doble click para añadir
-        self.mat_listbox.bind('<Double-Button-1>', lambda e: self._add_selected_material())
-        
-        # Cargar materiales
-        self.materials_list = db.list_materials()
-        self.filtered_materials = []
-        self._filter_materials()
-    
-    def _create_material_action_buttons(self, parent):
-        """Crea los botones de acción para materiales"""
-        btn_frame = ttk.Frame(parent)
-        btn_frame.pack(fill='x')
-        
-        add_btn = create_styled_button(
-            btn_frame, '+ Añadir', self._add_selected_material, 'success'
-        )
-        add_btn.pack(side='left', fill='x', expand=True, padx=(0, 3))
-        
-        new_btn = create_styled_button(
-            btn_frame, 'Nuevo', self._quick_add_material, 'primary'
-        )
-        new_btn.pack(side='right', fill='x', expand=True, padx=(3, 0))
-    
-    def _create_center_panel(self, parent):
-        """Crea el panel central con la lista de items"""
-        center_panel = ttk.Frame(parent, padding=10)
-        center_panel.grid(row=0, column=1, sticky='nsew', padx=(5, 5), pady=10)
-        
-        # Configurar para que se expanda
-        center_panel.grid_rowconfigure(1, weight=1)
-        center_panel.grid_columnconfigure(0, weight=1)
-        
-        # Título con icono
-        title_label = ttk.Label(center_panel, text='📋 Items del presupuesto', 
-                 font=('Helvetica', 12, 'bold'))
-        title_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
-        
-        # Frame con borde visible para la tabla
-        border_canvas = tk.Canvas(center_panel, highlightthickness=2,
-                                 highlightbackground='#2B7DE9',
-                                 highlightcolor='#2B7DE9',
-                                 background='#FFFFFF')
-        border_canvas.grid(row=1, column=0, sticky='nsew', pady=(0, 8))
-        
-        tree_container = ttk.Frame(border_canvas)
-        tree_container.pack(fill='both', expand=True, padx=1, pady=1)
-        
-        # Tabla de items con columnas incluyendo beneficio y margen (height reducido)
-        columns = ('name', 'supplier_price', 'price', 'benefit', 'margin', 'qty', 'total')
-        self.items_tree = ttk.Treeview(tree_container, columns=columns, show='headings', height=6)
-        
-        self.items_tree.heading('name', text='📦 Material', anchor='w')
-        self.items_tree.heading('supplier_price', text='💶 P. Proveedor', anchor='e')
-        self.items_tree.heading('price', text='💰 PVP', anchor='e')
-        self.items_tree.heading('benefit', text='📈 Beneficio', anchor='e')
-        self.items_tree.heading('margin', text='📊 Margen %', anchor='center')
-        self.items_tree.heading('qty', text='🔢 Cantidad', anchor='center')
-        self.items_tree.heading('total', text='💵 Total', anchor='e')
-        
-        self.items_tree.column('name', width=160, anchor='w')
-        self.items_tree.column('supplier_price', width=105, anchor='e')
-        self.items_tree.column('price', width=90, anchor='e')
-        self.items_tree.column('benefit', width=90, anchor='e')
-        self.items_tree.column('margin', width=85, anchor='center')
-        self.items_tree.column('qty', width=80, anchor='center')
-        self.items_tree.column('total', width=110, anchor='e')
-        
-        # Configurar tags para filas alternadas con mejor contraste
-        self.items_tree.tag_configure('oddrow', background='#FFFFFF')
-        self.items_tree.tag_configure('evenrow', background='#F0F4F8')
-        
-        self.items_tree.pack(side='left', fill='both', expand=True)
-        
-        # Scrollbar
-        scrollbar = ttk.Scrollbar(tree_container, orient='vertical', command=self.items_tree.yview)
-        self.items_tree.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side='right', fill='y')
-        
-        # Doble click para editar la celda
-        self.items_tree.bind('<Double-Button-1>', lambda e: self._edit_item_cell(e))
-        
-        # Botones de items (más compactos y ordenados)
-        item_btns = ttk.Frame(center_panel)
-        item_btns.grid(row=2, column=0, sticky='ew', pady=(0, 8))
-        
-        edit_btn = create_styled_button(item_btns, '✏️ Editar', self._edit_item, 'info')
-        edit_btn.pack(side='left', padx=(0, 5))
-        
-        remove_btn = create_styled_button(item_btns, '🗑️ Quitar', self._remove_item, 'danger')
-        remove_btn.pack(side='left')
-        
-        # Resumen de totales (más compacto y visible)
-        totals_frame = ttk.LabelFrame(center_panel, text='💵 Resumen', padding=10)
-        totals_frame.grid(row=3, column=0, sticky='ew')
-        
-        self.total_label = ttk.Label(totals_frame, text='Total: 0.00 €', 
-                                   font=('Helvetica', 13, 'bold'),
-                                   foreground='#2B7DE9')
-        self.total_label.pack()
-    
-    def _create_document_and_preview_panel(self, parent):
-        """Crea el panel derecho con editor WYSIWYG del documento completo"""
-        right_panel = ttk.Frame(parent, padding=10)
-        right_panel.grid(row=0, column=1, sticky='nsew', padx=(5, 10), pady=10)
-        
-        # Configurar para que se expanda
-        right_panel.grid_rowconfigure(0, weight=1)  # Editor ocupa todo el espacio
-        right_panel.grid_columnconfigure(0, weight=1)
-        
-        # Editor WYSIWYG para el documento completo (incluye su propia toolbar con botón regenerar)
-        self.document_editor = PDFStyleEditor(right_panel, regenerate_callback=self._regenerate_document)
-        self.document_editor.grid(row=0, column=0, sticky='nsew')
-        
-        # Configurar callback para marcar como modificado
-        self.document_editor.on_change_callback = self._on_document_change
-    
-    def _create_preview_panel(self, parent):
-        """LEGACY: Mantener por compatibilidad - ahora usa _create_document_and_preview_panel"""
-        pass
-    
-    def _create_bottom_buttons(self):
-        """Crea los botones principales de la ventana"""
-        bottom_frame = ttk.Frame(self, padding=(10, 8))
-        bottom_frame.grid(row=1, column=0, sticky='ew')
-        
-        # Configurar grid para centrar
-        self.grid_rowconfigure(1, weight=0)
-        bottom_frame.grid_columnconfigure(0, weight=1)
-        bottom_frame.grid_columnconfigure(1, weight=0)
-        bottom_frame.grid_columnconfigure(2, weight=1)
-        
-        # Botón cancelar (izquierda)
-        cancel_btn = create_styled_button(
-            bottom_frame, 'Cancelar', self.destroy, 'secondary'
-        )
-        cancel_btn.grid(row=0, column=0, sticky='w', padx=5)
-        
-        # Texto de ayuda (centrado)
-        help_text = 'Ctrl+S: Guardar | Esc: Cancelar'
-        ttk.Label(bottom_frame, text=help_text, font=('Helvetica', 8), 
-                 foreground='gray').grid(row=0, column=1, padx=10)
-        
-        # Botón guardar (derecha, prominente)
-        save_btn = create_styled_button(
-            bottom_frame, '💾 GUARDAR PRESUPUESTO', self._save, 'success'
-        )
-        save_btn.grid(row=0, column=2, sticky='e', padx=5, ipadx=15, ipady=5)
-    
-    def _setup_keyboard_shortcuts(self):
-        """Configura los atajos de teclado"""
-        shortcuts = {
-            '<Escape>': self.destroy,
-            '<Control-s>': self._save,
-            '<Control-S>': self._save
-        }
-        bind_keyboard_shortcuts(self, shortcuts)
-    
-    def _quick_add_client(self):
-        """Abre el editor para añadir un nuevo cliente"""
-        ClientEditor(self, client_id=None, on_save=self._reload_clients)
-    
-    def _reload_clients(self):
-        """Recarga la lista de clientes después de añadir uno nuevo"""
-        self.clients_list = db.list_clients()
-        self._filter_clients()
-    
-    def _filter_clients(self):
-        """Filtra la lista de clientes según la búsqueda"""
-        query = self.client_search_var.get().strip().lower()
-        
-        if not query:
-            self._show_all_clients()
-            return
-        
-        # Filtrar clientes
-        self.filtered_clients = []
-        for client in self.clients_list:
-            name = client['name'].lower()
-            dni = (client['dni'] or '').lower()
-            
-            if query in name or query in dni:
-                self.filtered_clients.append(client)
-        
-        # Mostrar resultados filtrados
-        self._show_filtered_clients()
-    
-    def _show_all_clients(self):
-        """Muestra todos los clientes"""
-        self.filtered_clients = self.clients_list.copy()
-        self.client_listbox.delete(0, tk.END)
-        
-        for client in self.filtered_clients:
-            display_text = client['name']
-            if client['dni']:
-                display_text += f" - {client['dni']}"
-            self.client_listbox.insert(tk.END, display_text)
-    
-    def _show_filtered_clients(self):
-        """Muestra los clientes filtrados"""
-        self.client_listbox.delete(0, tk.END)
-        
-        for client in self.filtered_clients:
-            display_text = client['name']
-            if client['dni']:
-                display_text += f" - {client['dni']}"
-            self.client_listbox.insert(tk.END, display_text)
-    
-    def _select_client(self):
-        """Selecciona el cliente de la lista"""
-        selection = self.client_listbox.curselection()
-        if not selection:
-            return
-        
-        idx = selection[0]
-        if idx >= len(self.filtered_clients):
-            return
-        
-        client = self.filtered_clients[idx]
-        self.selected_client = client
-        
-        # Actualizar el campo de búsqueda con el nombre seleccionado
-        self.client_search_var.set(client['name'])
-        
-        # Actualizar el documento con los nuevos datos del cliente
-        self._schedule_document_update()
-        
-        # Enfocar en el siguiente campo
-        self.work_name_entry.focus()
-    
-    def _quick_add_material(self):
-        """Abre el editor para añadir un nuevo material"""
-        MaterialEditor(self, material_id=None, on_save=self._reload_materials)
-    
-    def _reload_materials(self):
-        """Recarga la lista de materiales"""
-        self.materials_list = db.list_materials()
-        self._filter_materials()
-    
-    def _reload_materials_list(self):
-        """Alias para recargar la lista de materiales (usado al actualizar precios)"""
-        self._reload_materials()
-    
-    def _filter_materials(self):
-        """Filtra los materiales según el término de búsqueda"""
-        query = self.mat_search_var.get().strip().lower()
-        
-        self.mat_listbox.delete(0, tk.END)
-        self.filtered_materials = []
-        
-        if not query:
-            # Mostrar todos los materiales agrupados por categoría
-            self._show_all_materials()
-        else:
-            # Buscar y mostrar materiales coincidentes
-            self._show_filtered_materials(query)
-    
-    def _show_all_materials(self):
-        """Muestra todos los materiales agrupados por categoría"""
-        materials_by_cat = {}
-        for material in self.materials_list:
-            category = material['category'] or 'Sin categoría'
-            if category not in materials_by_cat:
-                materials_by_cat[category] = []
-            materials_by_cat[category].append(material)
-        
-        for category in sorted(materials_by_cat.keys()):
-            self.mat_listbox.insert(tk.END, f"━━ {category} ━━")
-            self.filtered_materials.append(None)  # Separador de categoría
-            
-            for material in sorted(materials_by_cat[category], key=lambda x: x['name']):
-                display = f"  {material['name']} - {format_price_es(material['price'])}€"
-                self.mat_listbox.insert(tk.END, display)
-                self.filtered_materials.append(material)
-    
-    def _show_filtered_materials(self, query):
-        """Muestra los materiales filtrados por búsqueda"""
-        matches = []
-        for material in self.materials_list:
-            score = self._calculate_search_score(material, query)
-            if score > 0:
-                matches.append((score, material))
-        
-        # Ordenar por puntuación y luego por nombre
-        matches.sort(key=lambda x: (-x[0], x[1]['name']))
-        
-        if matches:
-            for score, material in matches[:20]:  # Limitar a 20 resultados
-                category = material['category'] or 'Sin categoría'
-                try:
-                    supplier_price = material['supplier_price'] or 0
-                except (KeyError, IndexError):
-                    supplier_price = 0
-                display = f"{material['name']} [{category}] - Prov: {format_price_es(supplier_price)}€ | Venta: {format_price_es(material['price'])}€"
-                self.mat_listbox.insert(tk.END, display)
-                self.filtered_materials.append(material)
-        else:
-            self.mat_listbox.insert(tk.END, "❌ No se encontraron materiales")
-            self.filtered_materials.append(None)
-    
-    def _calculate_search_score(self, material, query):
-        """Calcula la puntuación de coincidencia para la búsqueda"""
-        name_lower = material['name'].lower()
-        desc_lower = (material['description'] or '').lower()
-        cat_lower = (material['category'] or '').lower()
-        
-        # Coincidencia exacta en nombre
-        if query == name_lower:
-            return 100
-        elif name_lower.startswith(query):
-            return 90
-        elif query in name_lower:
-            return 80
-        elif query in desc_lower:
-            return 50
-        elif query in cat_lower:
-            return 40
-        
-        return 0
-    
-    def _add_selected_material(self):
-        """Añade el material seleccionado a la lista de items"""
-        selection = self.mat_listbox.curselection()
-        if not selection:
-            if self.filtered_materials and self.filtered_materials[0]:
-                # Auto-seleccionar el primero si no hay selección
-                selection = (0,)
+            # Establecer precio de venta y margen
+            if material.precio_venta and material.precio_compra and material.precio_compra > 0:
+                # Usar el precio de venta del material
+                self.precio_venta_unitario_input.setValue(material.precio_venta)
+                # Calcular el margen real del material
+                margen_real = 100 * (1 - (material.precio_compra / material.precio_venta))
+                self.margen_input.setValue(margen_real)
             else:
-                return
-        
-        idx = selection[0]
-        if idx >= len(self.filtered_materials):
+                # Si no hay precio de venta, usar el margen por defecto del material
+                margen_defecto = material.margen_ganancia_defecto if material.margen_ganancia_defecto else 20.0
+                self.margen_input.setValue(margen_defecto)
+                # Calcular precio de venta basado en margen
+                precio_venta = material.precio_compra / (1 - margen_defecto / 100.0)
+                self.precio_venta_unitario_input.setValue(precio_venta)
+
+        finally:
+            self._updating_prices = False
+
+        # Recalcular totales con los nuevos valores
+        self.calcular_totales()
+
+    def on_precio_compra_changed(self):
+        """Cuando cambia el precio de compra, recalcular precio de venta basado en margen"""
+        if self._updating_prices:
             return
-        
-        material = self.filtered_materials[idx]
-        if material is None:  # Separador de categoría
-            return
-        
-        # Obtener precio de proveedor
+
+        self._updating_prices = True
         try:
-            supplier_price = material['supplier_price'] or 0
-        except (KeyError, IndexError):
-            supplier_price = 0
-        
-        # Añadir directamente con cantidad 1 y precio por defecto
-        self.items_data.append({
-            'material_id': material['id'],
-            'name': material['name'],
-            'description': material['description'],
-            'image_path': material['image_path'],
-            'price': material['price'],  # Precio de venta por defecto
-            'supplier_price': supplier_price,  # Precio del proveedor
-            'quantity': 1.0,  # Cantidad 1 por defecto
-            'original_price': material['price']  # Guardar precio original para comparación
-        })
-        
-        self._refresh_items()
-        self.mat_search_var.set('')  # Limpiar búsqueda
-    
-    def _refresh_items(self):
-        """Actualiza la visualización de items"""
-        # Limpiar items existentes
-        for item in self.items_tree.get_children():
-            self.items_tree.delete(item)
-        
-        # Añadir items actuales con filas alternadas
-        for i, item in enumerate(self.items_data):
-            total = item['price'] * item['quantity']
-            tag = 'evenrow' if i % 2 == 0 else 'oddrow'
-            
-            # Obtener precio de proveedor (items_data es dict, sí tiene .get())
-            supplier_price = item.get('supplier_price', 0) or 0
-            sale_price = item['price']
-            
-            # Calcular beneficio y margen
-            benefit = sale_price - supplier_price
-            margin = ((benefit / sale_price) * 100) if sale_price > 0 else 0
-            
-            self.items_tree.insert('', 'end', iid=str(i), values=(
-                item['name'],
-                format_price_es(supplier_price),
-                format_price_es(sale_price),
-                format_price_es(benefit),
-                f"{margin:.1f}%",
-                item['quantity'],
-                format_price_es(total)
-            ), tags=(tag,))
-        
-        self._update_totals()
-        
-        # Regenerar el documento para reflejar los cambios
-        self._schedule_document_update()
-    
-    def _update_totals(self):
-        """Actualiza la visualización de totales"""
-        subtotal = sum(item['price'] * item['quantity'] for item in self.items_data)
-        
+            precio_compra = self.precio_compra_input.value()
+            margen = self.margen_input.value()
+            precio_venta_unitario = precio_compra / (1 - margen / 100.0)
+            self.precio_venta_unitario_input.setValue(precio_venta_unitario)
+            self.calcular_totales()
+        finally:
+            self._updating_prices = False
+
+    def on_margen_changed(self):
+        """Cuando cambia el margen, recalcular precio de venta"""
+        if self._updating_prices:
+            return
+
+        self._updating_prices = True
         try:
-            labor_cost = float(self.labor_entry.get() or 0)
-        except ValueError:
-            labor_cost = 0
-        
-        total = subtotal + labor_cost
-        
-        self.total_label.config(
-            text=f'Subtotal: {format_price_es(subtotal)} € | Mano de obra: {format_price_es(labor_cost)} € | TOTAL: {format_price_es(total)} €'
-        )
-    
-    def _schedule_document_update(self):
-        """Programa una actualización del documento con debouncing"""
-        if hasattr(self, 'document_update_job') and self.document_update_job:
-            self.after_cancel(self.document_update_job)
-        self.document_update_job = self.after(500, self._regenerate_document)
-        
-        # Actualizar preview
-        self._schedule_preview_update()
-    
-    def _edit_item_cell(self, event):
-        """Edita la celda clickeada directamente en el Treeview"""
-        region = self.items_tree.identify('region', event.x, event.y)
-        if region != 'cell':
+            precio_compra = self.precio_compra_input.value()
+            margen = self.margen_input.value()
+            precio_venta_unitario = precio_compra / (1 - margen / 100.0)
+            self.precio_venta_unitario_input.setValue(precio_venta_unitario)
+            self.calcular_totales()
+        finally:
+            self._updating_prices = False
+
+    def on_precio_venta_changed(self):
+        """Cuando cambia el precio de venta, recalcular margen"""
+        if self._updating_prices:
             return
-        
-        column = self.items_tree.identify_column(event.x)
-        row_id = self.items_tree.identify_row(event.y)
-        
-        if not row_id:
-            return
-        
-        # Permitir editar: supplier_price (#2), price (#3), benefit (#4), margin (#5), qty (#6)
-        if column not in ('#2', '#3', '#4', '#5', '#6'):  
-            return
-        
-        idx = int(row_id)
-        item = self.items_data[idx]
-        
-        # Obtener valores actuales
-        supplier_price = item.get('supplier_price', 0) or 0
-        sale_price = item['price']
-        quantity = item['quantity']
-        
-        # Determinar qué estamos editando
-        if column == '#2':  # Precio proveedor
-            col_label = 'Precio Proveedor'
-            current_value = supplier_price
-        elif column == '#3':  # Precio venta
-            col_label = 'Precio Venta'
-            current_value = sale_price
-        elif column == '#4':  # Beneficio
-            col_label = 'Beneficio'
-            current_value = sale_price - supplier_price
-        elif column == '#5':  # Margen %
-            col_label = 'Margen %'
-            current_value = ((sale_price - supplier_price) / sale_price * 100) if sale_price > 0 else 0
-        else:  # column == '#6' - Cantidad
-            col_label = 'Cantidad'
-            current_value = quantity
-        
-        # Obtener posición de la celda
-        bbox = self.items_tree.bbox(row_id, column)
-        if not bbox:
-            return
-        
-        # Crear Entry temporal sobre la celda
-        x, y, width, height = bbox
-        
-        entry_var = tk.StringVar(value=str(current_value).replace('%', ''))
-        entry = tk.Entry(self.items_tree, textvariable=entry_var, 
-                        font=('Segoe UI', 10), 
-                        relief='solid',
-                        borderwidth=2,
-                        justify='center')
-        entry.place(x=x, y=y, width=width, height=height)
-        entry.focus_set()
-        entry.select_range(0, tk.END)
-        entry.icursor(tk.END)
-        
-        def save_edit(event=None):
-            try:
-                new_value = float(entry_var.get())
-                material_updated = False  # Flag para saber si debemos recargar la lista de materiales
-                
-                if column == '#2':  # Precio proveedor
-                    if new_value < 0:
-                        raise ValueError("El precio no puede ser negativo")
-                    old_supplier_price = self.items_data[idx]['supplier_price']
-                    self.items_data[idx]['supplier_price'] = new_value
-                    # El precio de venta se mantiene, beneficio y margen se recalculan
-                    
-                    # Actualizar en la base de datos si cambió
-                    if old_supplier_price != new_value and 'material_id' in self.items_data[idx]:
-                        material_id = self.items_data[idx]['material_id']
-                        db.update_material_supplier_price(material_id, new_value)
-                        material_updated = True
-                    
-                elif column == '#3':  # Precio venta
-                    if new_value < 0:
-                        raise ValueError("El precio no puede ser negativo")
-                    old_price = self.items_data[idx]['price']
-                    self.items_data[idx]['price'] = new_value
-                    # El precio proveedor se mantiene, beneficio y margen se recalculan
-                    
-                    # Actualizar en la base de datos si cambió
-                    if old_price != new_value and 'material_id' in self.items_data[idx]:
-                        material_id = self.items_data[idx]['material_id']
-                        db.update_material_price(material_id, new_value)
-                        material_updated = True
-                    
-                elif column == '#4':  # Beneficio
-                    if new_value < 0:
-                        raise ValueError("El beneficio no puede ser negativo")
-                    # Beneficio = Precio Venta - Precio Proveedor
-                    # Nuevo Precio Venta = Precio Proveedor + Beneficio
-                    supplier_price = item.get('supplier_price', 0) or 0
-                    new_sale_price = supplier_price + new_value
-                    if new_sale_price < 0:
-                        raise ValueError("El precio de venta resultante no puede ser negativo")
-                    old_price = self.items_data[idx]['price']
-                    self.items_data[idx]['price'] = new_sale_price
-                    
-                    # Actualizar precio de venta en la base de datos
-                    if old_price != new_sale_price and 'material_id' in self.items_data[idx]:
-                        material_id = self.items_data[idx]['material_id']
-                        db.update_material_price(material_id, new_sale_price)
-                        material_updated = True
-                    
-                elif column == '#5':  # Margen %
-                    if new_value < 0 or new_value >= 100:
-                        raise ValueError("El margen debe estar entre 0 y 99.9%")
-                    # Margen = ((Precio Venta - Precio Proveedor) / Precio Venta) * 100
-                    # Precio Venta = Precio Proveedor / (1 - Margen/100)
-                    supplier_price = item.get('supplier_price', 0) or 0
-                    margin_decimal = new_value / 100
-                    if margin_decimal >= 1:
-                        raise ValueError("El margen no puede ser 100% o superior")
-                    new_sale_price = supplier_price / (1 - margin_decimal) if margin_decimal < 1 else supplier_price * 2
-                    old_price = self.items_data[idx]['price']
-                    self.items_data[idx]['price'] = new_sale_price
-                    
-                    # Actualizar precio de venta en la base de datos
-                    if old_price != new_sale_price and 'material_id' in self.items_data[idx]:
-                        material_id = self.items_data[idx]['material_id']
-                        db.update_material_price(material_id, new_sale_price)
-                        material_updated = True
-                    
-                else:  # column == '#6' - Cantidad
-                    if new_value <= 0:
-                        raise ValueError("La cantidad debe ser mayor que 0")
-                    self.items_data[idx]['quantity'] = new_value
-                
-                self._refresh_items()
-                
-                # Si se actualizó un material en la BD, recargar la lista de materiales
-                if material_updated:
-                    self._reload_materials_list()
-            except ValueError as e:
-                messagebox.showerror('Error', str(e) if str(e) else 'Valor inválido')
-            finally:
-                entry.destroy()
-        
-        def cancel_edit(event=None):
-            entry.destroy()
-        
-        entry.bind('<Return>', save_edit)
-        entry.bind('<Escape>', cancel_edit)
-        entry.bind('<FocusOut>', save_edit)
-    
-    def _edit_item(self):
-        """Mensaje informativo para usar doble click"""
-        messagebox.showinfo(
-            'Editar items',
-            'Para editar cualquier valor (precio proveedor, precio venta, beneficio, margen, cantidad), '
-            'haz doble click directamente sobre el valor que quieres cambiar.\n\n'
-            'Los campos están sincronizados:\n'
-            '• Si cambias el precio proveedor → se recalculan beneficio y margen\n'
-            '• Si cambias el precio venta → se recalculan beneficio y margen\n'
-            '• Si cambias el beneficio → se recalcula el precio de venta\n'
-            '• Si cambias el margen → se recalcula el precio de venta'
-        )
-    
-    def _remove_item(self):
-        """Elimina el item seleccionado"""
-        selected = self.items_tree.selection()
-        if not selected:
-            return
-        
-        idx = int(selected[0])
-        del self.items_data[idx]
-        self._refresh_items()
-    
-    def _load_data(self):
-        """Carga los datos del presupuesto si está editando"""
-        print(f"DEBUG _load_data: quote_id={self.quote_id}")
-        
-        if not self.quote_id:
-            # Si es nuevo presupuesto, no hay datos que cargar
-            print("DEBUG: Nuevo presupuesto, sin datos que cargar")
-            return
-        
-        quote, items = db.get_quote(self.quote_id)
-        if not quote:
-            messagebox.showerror('Error', 'Presupuesto no encontrado')
-            self.destroy()
-            return
-        
-        # Cargar información del presupuesto
-        if quote['client_name']:
-            self.client_search_var.set(quote['client_name'])
-            # Buscar el cliente en la lista para seleccionarlo
-            for client in self.clients_list:
-                if client['name'] == quote['client_name']:
-                    self.selected_client = client
+
+        self._updating_prices = True
+        try:
+            precio_compra = self.precio_compra_input.value()
+            precio_venta = self.precio_venta_unitario_input.value()
+
+            if precio_compra > 0:
+                margen = 100 * (1-(precio_compra / precio_venta))
+                self.margen_input.setValue(margen)
+
+            self.calcular_totales()
+        finally:
+            self._updating_prices = False
+
+    def calcular_totales(self):
+        """Calcula los totales automáticamente"""
+        cantidad = self.cantidad_input.value()
+        precio_compra = self.precio_compra_input.value()
+        precio_venta_unitario = self.precio_venta_unitario_input.value()
+
+        coste_total = cantidad * precio_compra
+        precio_venta_total = cantidad * precio_venta_unitario
+        ganancia = precio_venta_total - coste_total
+
+        self.coste_total_label.setText(format_currency(coste_total))
+        self.ganancia_label.setText(format_currency(ganancia))
+        self.precio_venta_label.setText(format_currency(precio_venta_total))
+
+    def new_material(self):
+        """Crea un nuevo material desde el diálogo"""
+        dialog = MaterialDialog(self, db=self.db)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            show_info(self, "Éxito", "Material creado correctamente")
+            self.load_materials()
+            # Seleccionar el material recién creado
+            material = dialog.get_material()
+            for i, m in enumerate(self.materiales):
+                if m.id == material.id:
+                    self.material_combo.setCurrentIndex(i)
                     break
-        
-        # Cargar work_name de forma segura
+
+    def load_line_data(self):
+        """Carga los datos de una línea existente"""
+        # Bloquear actualizaciones automáticas mientras cargamos los datos
+        self._updating_prices = True
         try:
-            if quote['work_name']:
-                self.work_name_entry.delete(0, tk.END)
-                self.work_name_entry.insert(0, quote['work_name'])
-        except (KeyError, IndexError):
-            pass  # La columna no existe en presupuestos antiguos
-        
-        if quote['labor_cost']:
-            self.labor_entry.delete(0, tk.END)
-            self.labor_entry.insert(0, str(quote['labor_cost']))
-        
-        # Cargar items PRIMERO
-        for item in items:
-            # Obtener precio de proveedor
-            try:
-                supplier_price = item['supplier_price'] or 0
-            except (KeyError, IndexError):
-                supplier_price = 0
-            
-            self.items_data.append({
-                'material_id': item['material_id'],
-                'name': item['name'],
-                'description': item['description'],
-                'image_path': item['image_path'],
-                'price': item['unit_price'],
-                'supplier_price': supplier_price,
-                'quantity': item['quantity'],
-                'original_price': item['unit_price']  # Guardar precio original
+            # Buscar y seleccionar el material
+            for i, m in enumerate(self.materiales):
+                if m.id == self.linea.material_id:
+                    self.material_combo.setCurrentIndex(i)
+                    break
+
+            self.cantidad_input.setValue(self.linea.cantidad)
+            self.precio_compra_input.setValue(self.linea.precio_compra_unitario)
+            self.margen_input.setValue(self.linea.margen_ganancia_porc)
+
+            # Calcular precio de venta unitario desde la línea
+            precio_venta_unitario = self.linea.precio_compra_unitario / (1 - self.linea.margen_ganancia_porc / 100.0)
+            self.precio_venta_unitario_input.setValue(precio_venta_unitario)
+
+            self.descripcion_input.setPlainText(self.linea.descripcion_personalizada or "")
+        finally:
+            self._updating_prices = False
+
+        self.calcular_totales()
+
+    def accept_dialog(self):
+        """Valida y acepta el diálogo"""
+        if self.material_combo.currentIndex() < 0:
+            show_error(self, "Error", "Debe seleccionar un material")
+            return
+
+        if self.cantidad_input.value() <= 0:
+            show_error(self, "Error", "La cantidad debe ser mayor que 0")
+            return
+
+        # Actualizar el material en la base de datos con los nuevos precios
+        try:
+            material_id = self.material_combo.currentData()
+            material = next((m for m in self.materiales if m.id == material_id), None)
+
+            if material:
+                precio_compra_actual = self.precio_compra_input.value()
+                precio_venta_actual = self.precio_venta_unitario_input.value()
+                margen_actual = self.margen_input.value()
+
+                # Solo actualizar si los precios han cambiado
+                if (precio_compra_actual != material.precio_compra or
+                    precio_venta_actual != material.precio_venta or
+                    margen_actual != material.margen_ganancia_defecto):
+
+                    dao = MaterialDAO(self.db)
+                    dao.actualizar(
+                        material_id,
+                        precio_compra=precio_compra_actual,
+                        precio_venta=precio_venta_actual,
+                        margen_ganancia_defecto=margen_actual
+                    )
+
+                    # Recargar la lista de materiales para reflejar los cambios
+                    self.load_materials()
+
+                    # Emitir señal de que el material fue actualizado
+                    self.material_updated.emit(material_id)
+        except Exception as e:
+            # No fallar si hay error al actualizar el material, solo mostrar advertencia
+            show_error(self, "Advertencia", f"No se pudo actualizar el material: {str(e)}")
+
+        self.accept()
+
+    def get_line_data(self):
+        """Retorna los datos de la línea"""
+        return {
+            'material_id': self.material_combo.currentData(),
+            'cantidad': self.cantidad_input.value(),
+            'precio_compra_unitario': self.precio_compra_input.value(),
+            'margen_ganancia_porc': self.margen_input.value(),
+            'descripcion_personalizada': self.descripcion_input.toPlainText().strip()
+        }
+
+
+class QuoteEditor(QDialog):
+    """Editor de presupuesto"""
+
+    material_updated = pyqtSignal(int)  # Señal para propagar actualizaciones de materiales
+
+    def __init__(self, parent=None, db=None, presupuesto=None):
+        super().__init__(parent)
+        self.db = db
+        self.presupuesto = presupuesto
+        self.lineas_temp = []  # Líneas temporales antes de guardar
+        self.init_ui()
+
+        if presupuesto:
+            self.load_quote_data()
+
+    def init_ui(self):
+        """Inicializa la interfaz"""
+        self.setWindowTitle("Nuevo Presupuesto" if not self.presupuesto else f"Editar Presupuesto")
+        self.setModal(True)
+        # Ajustar tamaño al monitor disponible
+        adjust_dialog_to_screen(self, preferred_width=1000, preferred_height=700)
+
+        # Layout principal del diálogo
+        main_layout = QVBoxLayout()
+
+        # Crear widget de contenido y hacer scrollable
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+
+        # Datos del presupuesto
+        header_group = QGroupBox("Datos del Presupuesto")
+        header_layout = QFormLayout()
+
+        self.numero_input = QLineEdit()
+        self.numero_input.setReadOnly(True)
+
+        # Cliente
+        cliente_layout = QHBoxLayout()
+        self.cliente_combo = QComboBox()
+        self.cliente_combo.setMinimumWidth(300)
+        self.new_cliente_btn = QPushButton("+ Nuevo Cliente")
+        self.new_cliente_btn.clicked.connect(self.new_cliente)
+        cliente_layout.addWidget(self.cliente_combo)
+        cliente_layout.addWidget(self.new_cliente_btn)
+
+        self.fecha_input = QDateEdit()
+        self.fecha_input.setCalendarPopup(True)
+        self.fecha_input.setDate(QDate.currentDate())
+        self.fecha_input.setDisplayFormat("dd/MM/yyyy")
+
+        self.fecha_validez_input = QDateEdit()
+        self.fecha_validez_input.setCalendarPopup(True)
+        self.fecha_validez_input.setDate(QDate.currentDate().addDays(30))
+        self.fecha_validez_input.setDisplayFormat("dd/MM/yyyy")
+
+        self.titulo_input = QLineEdit()
+
+        self.descripcion_input = QTextEdit()
+        self.descripcion_input.setMaximumHeight(60)
+
+        self.estado_combo = QComboBox()
+        self.estado_combo.addItems(["borrador", "enviado", "aceptado", "rechazado", "facturado"])
+
+        self.coste_mano_obra_input = QDoubleSpinBox()
+        self.coste_mano_obra_input.setRange(0, 999999.99)
+        self.coste_mano_obra_input.setDecimals(2)
+        self.coste_mano_obra_input.setSuffix(" €")
+        self.coste_mano_obra_input.setGroupSeparatorShown(True)
+        self.coste_mano_obra_input.valueChanged.connect(self.calcular_totales)
+
+        self.descuento_input = QDoubleSpinBox()
+        self.descuento_input.setRange(0, 100)
+        self.descuento_input.setDecimals(2)
+        self.descuento_input.setSuffix(" %")
+        self.descuento_input.valueChanged.connect(self.calcular_totales)
+
+        header_layout.addRow("Nº Presupuesto:", self.numero_input)
+        header_layout.addRow("Cliente*:", cliente_layout)
+        header_layout.addRow("Fecha:", self.fecha_input)
+        header_layout.addRow("Validez hasta:", self.fecha_validez_input)
+        header_layout.addRow("Título:", self.titulo_input)
+        header_layout.addRow("Descripción:", self.descripcion_input)
+        header_layout.addRow("Estado:", self.estado_combo)
+        header_layout.addRow("Coste Mano de Obra:", self.coste_mano_obra_input)
+        header_layout.addRow("Descuento Global (%):", self.descuento_input)
+
+        header_group.setLayout(header_layout)
+        content_layout.addWidget(header_group)
+
+        # Líneas del presupuesto
+        lines_group = QGroupBox("Líneas de Materiales")
+        lines_layout = QVBoxLayout()
+
+        # Barra de herramientas de líneas
+        lines_toolbar = QHBoxLayout()
+        self.add_line_btn = QPushButton("Añadir Línea")
+        self.add_line_btn.clicked.connect(self.add_line)
+        self.edit_line_btn = QPushButton("Editar Línea")
+        self.edit_line_btn.clicked.connect(self.edit_line)
+        self.edit_line_btn.setEnabled(False)
+        self.delete_line_btn = QPushButton("Eliminar Línea")
+        self.delete_line_btn.clicked.connect(self.delete_line)
+        self.delete_line_btn.setEnabled(False)
+
+        lines_toolbar.addWidget(self.add_line_btn)
+        lines_toolbar.addWidget(self.edit_line_btn)
+        lines_toolbar.addWidget(self.delete_line_btn)
+        lines_toolbar.addStretch()
+
+        lines_layout.addLayout(lines_toolbar)
+
+        # Tabla de líneas
+        self.lines_table = QTableWidget()
+        self.lines_table.setColumnCount(7)
+        self.lines_table.setHorizontalHeaderLabels([
+            "Material", "Cantidad", "Unidad", "P. Compra Unit.", "Margen %", "P. Venta Unit.", "Total Venta"
+        ])
+        self.lines_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.lines_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.lines_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.lines_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.lines_table.itemSelectionChanged.connect(self.on_line_selection_changed)
+        self.lines_table.doubleClicked.connect(self.edit_line)
+        self.lines_table.setMinimumHeight(350)  # Altura mínima para que sea bien visible
+
+        lines_layout.addWidget(self.lines_table)
+
+        lines_group.setLayout(lines_layout)
+        content_layout.addWidget(lines_group)
+
+        # Resumen de totales
+        totals_group = QGroupBox("Resumen de Totales")
+        totals_layout = QFormLayout()
+
+        self.total_materiales_coste_label = QLabel("0,00 €")
+        self.total_materiales_venta_label = QLabel("0,00 €")
+        self.ganancia_materiales_label = QLabel("0,00 €")
+        self.subtotal_label = QLabel("0,00 €")
+        self.descuento_importe_label = QLabel("0,00 €")
+        self.total_final_label = QLabel("0,00 €")
+        self.total_final_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+
+        totals_layout.addRow("Total Materiales (Coste):", self.total_materiales_coste_label)
+        totals_layout.addRow("Total Materiales (Venta):", self.total_materiales_venta_label)
+        totals_layout.addRow("Ganancia en Materiales:", self.ganancia_materiales_label)
+        totals_layout.addRow("Subtotal:", self.subtotal_label)
+        totals_layout.addRow("Descuento:", self.descuento_importe_label)
+        totals_layout.addRow("TOTAL FINAL:", self.total_final_label)
+
+        totals_group.setLayout(totals_layout)
+        content_layout.addWidget(totals_group)
+
+        # Crear scroll area para el contenido
+        scroll = QScrollArea()
+        scroll.setWidget(content_widget)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        main_layout.addWidget(scroll)
+
+        # Botones fuera del scroll area para que siempre sean visibles
+        buttons_layout = QHBoxLayout()
+
+        self.preview_button = QPushButton("👁️ Vista Previa")
+        self.preview_button.clicked.connect(self.preview_quote)
+        buttons_layout.addWidget(self.preview_button)
+
+        buttons_layout.addStretch()
+
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save |
+                                       QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.save_quote)
+        button_box.rejected.connect(self.reject)
+        buttons_layout.addWidget(button_box)
+
+        main_layout.addLayout(buttons_layout)
+
+        self.setLayout(main_layout)
+
+        # Cargar clientes
+        self.load_clientes()
+
+        # Generar número de presupuesto si es nuevo
+        if not self.presupuesto:
+            self.generar_numero()
+
+    def load_clientes(self):
+        """Carga los clientes en el combo"""
+        try:
+            dao = ClienteDAO(self.db)
+            clientes = dao.obtener_todos()
+
+            self.cliente_combo.clear()
+            for cliente in clientes:
+                display_text = str(cliente)
+                self.cliente_combo.addItem(display_text, cliente.id)
+
+        except Exception as e:
+            show_error(self, "Error", f"Error al cargar clientes: {str(e)}")
+
+    def new_cliente(self):
+        """Crea un nuevo cliente desde el diálogo"""
+        dialog = ClientDialog(self, db=self.db)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            show_info(self, "Éxito", "Cliente creado correctamente")
+            self.load_clientes()
+            # Seleccionar el cliente recién creado
+            cliente = dialog.get_cliente()
+            for i in range(self.cliente_combo.count()):
+                if self.cliente_combo.itemData(i) == cliente.id:
+                    self.cliente_combo.setCurrentIndex(i)
+                    break
+
+    def generar_numero(self):
+        """Genera un nuevo número de presupuesto"""
+        try:
+            dao = PresupuestoDAO(self.db)
+            numero = dao.generar_numero_presupuesto()
+            self.numero_input.setText(numero)
+        except Exception as e:
+            show_error(self, "Error", f"Error al generar número: {str(e)}")
+
+    def add_line(self):
+        """Añade una línea al presupuesto"""
+        dialog = AddLineDialog(self, db=self.db)
+        # Conectar señal de actualización de material
+        dialog.material_updated.connect(self.material_updated.emit)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            line_data = dialog.get_line_data()
+            self.lineas_temp.append(line_data)
+            self.refresh_lines_table()
+            self.calcular_totales()
+
+    def edit_line(self):
+        """Edita una línea del presupuesto"""
+        selected_row = self.lines_table.currentRow()
+        if selected_row < 0:
+            return
+
+        if selected_row >= len(self.lineas_temp):
+            return
+
+        # Obtener la línea a editar
+        linea_data = self.lineas_temp[selected_row]
+
+        # Crear objeto similar a LineaPresupuesto para el diálogo
+        class LineaTemporal:
+            def __init__(self, data):
+                self.material_id = data['material_id']
+                self.cantidad = data['cantidad']
+                self.precio_compra_unitario = data['precio_compra_unitario']
+                self.margen_ganancia_porc = data['margen_ganancia_porc']
+                self.descripcion_personalizada = data.get('descripcion_personalizada', '')
+
+        linea_temp = LineaTemporal(linea_data)
+
+        # Abrir diálogo de edición
+        dialog = AddLineDialog(self, db=self.db, linea=linea_temp)
+        # Conectar señal de actualización de material
+        dialog.material_updated.connect(self.material_updated.emit)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Actualizar la línea
+            new_data = dialog.get_line_data()
+            self.lineas_temp[selected_row] = new_data
+            self.refresh_lines_table()
+            self.calcular_totales()
+
+    def delete_line(self):
+        """Elimina una línea del presupuesto"""
+        selected_row = self.lines_table.currentRow()
+        if selected_row < 0:
+            return
+
+        if confirm_dialog(self, "Confirmar", "¿Eliminar esta línea?"):
+            del self.lineas_temp[selected_row]
+            self.refresh_lines_table()
+            self.calcular_totales()
+
+    def refresh_lines_table(self):
+        """Actualiza la tabla de líneas"""
+        self.lines_table.setRowCount(0)
+
+        dao_material = MaterialDAO(self.db)
+
+        for line_data in self.lineas_temp:
+            material = dao_material.obtener_por_id(line_data['material_id'])
+            if not material:
+                continue
+
+            row = self.lines_table.rowCount()
+            self.lines_table.insertRow(row)
+
+            cantidad = line_data['cantidad']
+            precio_compra = line_data['precio_compra_unitario']
+            margen = line_data['margen_ganancia_porc']
+
+            precio_venta_unit = precio_compra / (1 - margen / 100)
+            total_venta = precio_venta_unit * cantidad
+
+            self.lines_table.setItem(row, 0, QTableWidgetItem(material.nombre))
+            self.lines_table.setItem(row, 1, QTableWidgetItem(f"{cantidad:.2f}"))
+            self.lines_table.setItem(row, 2, QTableWidgetItem(material.unidad))
+            self.lines_table.setItem(row, 3, QTableWidgetItem(format_currency(precio_compra)))
+            self.lines_table.setItem(row, 4, QTableWidgetItem(f"{margen:.2f}%"))
+            self.lines_table.setItem(row, 5, QTableWidgetItem(format_currency(precio_venta_unit)))
+            self.lines_table.setItem(row, 6, QTableWidgetItem(format_currency(total_venta)))
+
+    def calcular_totales(self):
+        """Calcula los totales del presupuesto"""
+        total_coste = 0.0
+        total_venta = 0.0
+
+        for line_data in self.lineas_temp:
+            cantidad = line_data['cantidad']
+            precio_compra = line_data['precio_compra_unitario']
+            margen = line_data['margen_ganancia_porc']
+
+            coste = cantidad * precio_compra
+            venta = coste / (1 - margen / 100)
+
+            total_coste += coste
+            total_venta += venta
+
+        ganancia = total_venta - total_coste
+        coste_mano_obra = self.coste_mano_obra_input.value()
+        subtotal = total_venta + coste_mano_obra
+
+        descuento_porc = self.descuento_input.value()
+        descuento_importe = subtotal * (descuento_porc / 100)
+
+        total_final = subtotal - descuento_importe
+
+        self.total_materiales_coste_label.setText(format_currency(total_coste))
+        self.total_materiales_venta_label.setText(format_currency(total_venta))
+        self.ganancia_materiales_label.setText(format_currency(ganancia))
+        self.subtotal_label.setText(format_currency(subtotal))
+        self.descuento_importe_label.setText(format_currency(descuento_importe))
+        self.total_final_label.setText(format_currency(total_final))
+
+    def on_line_selection_changed(self):
+        """Maneja el cambio de selección en la tabla de líneas"""
+        has_selection = len(self.lines_table.selectedItems()) > 0
+        self.edit_line_btn.setEnabled(has_selection)
+        self.delete_line_btn.setEnabled(has_selection)
+
+    def load_quote_data(self):
+        """Carga los datos de un presupuesto existente"""
+        self.numero_input.setText(self.presupuesto.numero)
+
+        # Seleccionar cliente
+        for i in range(self.cliente_combo.count()):
+            if self.cliente_combo.itemData(i) == self.presupuesto.cliente_id:
+                self.cliente_combo.setCurrentIndex(i)
+                break
+
+        # Fechas
+        fecha = self.presupuesto.fecha_creacion
+        qdate = QDate(fecha.year, fecha.month, fecha.day)
+        self.fecha_input.setDate(qdate)
+
+        if self.presupuesto.fecha_validez:
+            fecha_validez = self.presupuesto.fecha_validez
+            qdate_validez = QDate(fecha_validez.year, fecha_validez.month, fecha_validez.day)
+            self.fecha_validez_input.setDate(qdate_validez)
+
+        self.titulo_input.setText(self.presupuesto.titulo or "")
+        self.descripcion_input.setPlainText(self.presupuesto.descripcion or "")
+
+        # Estado
+        index = self.estado_combo.findText(self.presupuesto.estado)
+        if index >= 0:
+            self.estado_combo.setCurrentIndex(index)
+
+        self.coste_mano_obra_input.setValue(self.presupuesto.coste_mano_obra)
+        self.descuento_input.setValue(self.presupuesto.descuento_global)
+
+        # Cargar líneas
+        for linea in self.presupuesto.lineas:
+            self.lineas_temp.append({
+                'id': linea.id,
+                'material_id': linea.material_id,
+                'cantidad': linea.cantidad,
+                'precio_compra_unitario': linea.precio_compra_unitario,
+                'margen_ganancia_porc': linea.margen_ganancia_porc,
+                'descripcion_personalizada': linea.descripcion_personalizada
             })
-        
-        self._refresh_items()
-        
-        # Cargar condiciones si existen
-        if hasattr(self, 'document_editor'):
-            try:
-                if quote.get('formatted_notes'):
-                    # Extraer solo las condiciones del texto guardado
-                    saved_text = quote['formatted_notes']
-                    # Las condiciones están después de "CONDICIONES:" o al principio
-                    self.saved_conditions = saved_text
-                else:
-                    self.saved_conditions = None
-            except (KeyError, AttributeError):
-                self.saved_conditions = None
-        
-        # La regeneración del documento se hará después al final de __init__
-        print("DEBUG: Todos los datos cargados")
-    
-    def _schedule_preview_update(self):
-        """Programa una actualización de la vista previa cuando cambien los datos"""
-        # Llamar directamente al método que actualiza la preview
-        self._on_document_change()
-    
-    def _regenerate_document(self):
-        """Regenera el documento completo en el editor desde los datos actuales"""
-        if not hasattr(self, 'document_editor'):
+
+        self.refresh_lines_table()
+        self.calcular_totales()
+
+    def preview_quote(self):
+        """Muestra una vista previa del presupuesto"""
+        # Validaciones básicas
+        if self.cliente_combo.currentIndex() < 0:
+            show_error(self, "Error", "Debe seleccionar un cliente para la vista previa")
             return
-        
-        # Obtener datos actuales
-        client_name = self.client_search_var.get().strip() or "Cliente"
-        client_address = ""
-        client_dni = ""
-        
-        if hasattr(self, 'selected_client') and self.selected_client:
-            try:
-                client_address = self.selected_client['address'] or ''
-            except (KeyError, IndexError, TypeError):
-                client_address = ''
-            
-            try:
-                client_dni = self.selected_client['dni'] or ''
-            except (KeyError, IndexError, TypeError):
-                client_dni = ''
-        
+
+        if len(self.lineas_temp) == 0:
+            show_error(self, "Error", "Debe añadir al menos una línea para la vista previa")
+            return
+
         try:
-            labor_cost = float(self.labor_entry.get())
-        except:
-            labor_cost = 0.0
-        
-        # Fecha actual en formato DD/MM/AA
-        from datetime import datetime
-        date_str = datetime.now().strftime('%d/%m/%y')
-        
-        # Calcular total
-        subtotal = sum(item['price'] * item['quantity'] for item in self.items_data)
-        total = subtotal + labor_cost
-        
-        # Generar el contenido del documento siguiendo el formato exacto de la plantilla
-        # Datos del cliente alineados a la derecha
-        doc_text = "\t\t\t\t\t\t" + client_name + "\n"
-        if client_address:
-            doc_text += "\t\t\t\t\t\t" + client_address + "\n"
-        if client_dni:
-            doc_text += "\t\t\t\t\t\tDNI/CIF: " + client_dni + "\n"
-        
-        doc_text += f"\nFecha: {date_str}\n\n"
-        doc_text += "Muy Sr. Nuestro:\n\n"
-        doc_text += "A continuación, detallamos desglose de presupuesto aproximado de trabajos a realizar en sus instalaciones\n\n"
-        
-        # Sección de materiales
-        doc_text += "MATERIALES\n"
-        if self.items_data:
-            for item in self.items_data:
-                # Solo mostrar nombre y cantidad, sin 'OBRA:' ni precio ni descripción
-                doc_text += f"{item['name']}\n"
-                doc_text += f"       Cantidad: {item['quantity']}\n"
-        
-        # Texto del total en negrita (el usuario puede editarlo)
-        doc_text += "\nEl total de los trabajos presupuestados, incluyendo mano de obra, materiales, asciende a la cantidad de\n"
-        
-        # Total centrado (formato español)
-        total_text = f"{format_price_es(total)} EUROS"
-        doc_text += f"\t\t\t\t{total_text}\n\n"
-        
-        # IVA (mayúsculas y subrayado - el usuario puede aplicar formato)
-        doc_text += "EL IVA SE INCREMENTARÁ EN LA FACTURA CORRESPONDIENTE\n\n"
-        
-        # Condiciones en mayúsculas
-        doc_text += "LOS TRABAJOS NO PRESUPUESTADOS SE COBRARÍAN A 25€/HORA O SE PRESUPUESTARÍA EN CASO DE OBRA MAYOR\n\n"
-        doc_text += "ESTE PRESUPUESTO TIENE UNA VALIDEZ DE 15 DÍAS\n\n"
-        
-        # Texto sobre permisos (normal)
-        doc_text += "No se incluyen los permisos ni licencias que sean necesarios, los cuales se deberá contar con ellos al comienzo de los trabajos. No se incluyen proyectos o memorias técnicas si fueran necesarios.\n\n\n\n"
-        
-        # Firmas con separación correcta
-        doc_text += "FIRMA DEL CONSTRUCTOR:                                        FIRMA DEL PROMOTOR:\n\n\n\n"
-        doc_text += "_______________________                                       _______________________\n"
-        doc_text += f"BARAJAS PEÑA S.L.                                             {client_name}\n"
-        
-        # Actualizar el editor
-        self.document_editor.set_plain_text(doc_text)
-        self.document_needs_save = True
-    
-    def _force_update_preview(self):
-        """Fuerza actualización inmediata del documento"""
-        self._regenerate_document()
-    
-    def _on_document_change(self):
-        """Se llama cuando cambian los datos del presupuesto"""
-        self.document_needs_save = True
-    
-    def _save(self):
-        """Valida y guarda el presupuesto"""
-        # Validar cliente
-        client_name = self.client_search_var.get().strip()
-        if not client_name:
-            messagebox.showerror('Error', 'Selecciona un cliente')
-            self.client_entry.focus()
+            # Crear un presupuesto temporal con los datos actuales
+            from src.templates.template_engine import TemplateEngine
+            from src.ui.document_viewer import DocumentViewer
+
+            # Obtener datos del cliente
+            cliente_dao = ClienteDAO(self.db)
+            cliente = cliente_dao.obtener_por_id(self.cliente_combo.currentData())
+
+            # Crear objeto presupuesto temporal
+            class PresupuestoTemporal:
+                def __init__(self, editor):
+                    self.numero = editor.numero_input.text()
+                    self.fecha_creacion = datetime(
+                        editor.fecha_input.date().year(),
+                        editor.fecha_input.date().month(),
+                        editor.fecha_input.date().day()
+                    )
+                    qdate_validez = editor.fecha_validez_input.date()
+                    self.fecha_validez = date(qdate_validez.year(), qdate_validez.month(), qdate_validez.day())
+                    self.estado = editor.estado_combo.currentText()
+                    self.titulo = editor.titulo_input.text()
+                    self.descripcion = editor.descripcion_input.toPlainText()
+                    self.coste_mano_obra = editor.coste_mano_obra_input.value()
+                    self.descuento_global = editor.descuento_input.value()
+                    self.notas_internas = ""
+                    self.cliente = cliente
+                    self.lineas = []
+
+                    # Crear líneas temporales
+                    dao_material = MaterialDAO(editor.db)
+                    for linea_data in editor.lineas_temp:
+                        material = dao_material.obtener_por_id(linea_data['material_id'])
+                        # Calcular valores según la fórmula: precio_venta = coste / (1 - margen/100)
+                        coste_total = linea_data['cantidad'] * linea_data['precio_compra_unitario']
+                        precio_venta_total = coste_total / (1 - linea_data['margen_ganancia_porc'] / 100)
+                        ganancia_importe = precio_venta_total - coste_total
+
+                        linea = type('LineaTemporal', (), {
+                            'material': material,
+                            'cantidad': linea_data['cantidad'],
+                            'precio_compra_unitario': linea_data['precio_compra_unitario'],
+                            'margen_ganancia_porc': linea_data['margen_ganancia_porc'],
+                            'descripcion_personalizada': linea_data.get('descripcion_personalizada', ''),
+                            'coste_total': coste_total,
+                            'ganancia_importe': ganancia_importe,
+                            'precio_venta_unitario': linea_data['precio_compra_unitario'] / (1 - linea_data['margen_ganancia_porc'] / 100),
+                            'precio_venta_total': precio_venta_total
+                        })()
+                        self.lineas.append(linea)
+
+                @property
+                def total_materiales_coste(self):
+                    return sum(l.coste_total for l in self.lineas)
+
+                @property
+                def total_materiales_venta(self):
+                    return sum(l.precio_venta_total for l in self.lineas)
+
+                @property
+                def ganancia_materiales(self):
+                    return self.total_materiales_venta - self.total_materiales_coste
+
+                @property
+                def subtotal(self):
+                    return self.total_materiales_venta + self.coste_mano_obra
+
+                @property
+                def descuento_importe(self):
+                    return self.subtotal * (self.descuento_global / 100.0)
+
+                @property
+                def total_final(self):
+                    return self.subtotal - self.descuento_importe
+
+            presupuesto_temp = PresupuestoTemporal(self)
+
+            # Generar HTML
+            engine = TemplateEngine()
+            html_content = engine.render_quote(presupuesto_temp)
+
+            # Mostrar en visor editable
+            viewer = DocumentViewer(
+                self,
+                html_content,
+                f"Vista Previa - Presupuesto {presupuesto_temp.numero}",
+                editable=True
+            )
+            viewer.exec()
+
+        except Exception as e:
+            show_error(self, "Error", f"Error al generar vista previa: {str(e)}")
+
+    def save_quote(self):
+        """Guarda el presupuesto"""
+        # Validaciones
+        if self.cliente_combo.currentIndex() < 0:
+            show_error(self, "Error", "Debe seleccionar un cliente")
             return
-        
-        # Validar items
-        if not self.items_data:
-            messagebox.showerror('Error', 'Añade al menos un item')
+
+        if len(self.lineas_temp) == 0:
+            show_error(self, "Error", "Debe añadir al menos una línea de material")
             return
-        
-        # Usar el cliente seleccionado si existe, sino buscar por nombre
-        client = self.selected_client
-        if not client:
-            # Buscar por nombre escrito
-            for c in self.clients_list:
-                if c['name'].lower() == client_name.lower():
-                    client = c
-                    break
-        
-        if client:
-            client_id = client['id']
-            client_address = client['address']
-            client_dni = client['dni']
-        else:
-            # Cliente no encontrado, usar el nombre tal cual
-            client_id = None
-            client_address = ''
-            client_dni = ''
-        
-        # Validar mano de obra
+
         try:
-            labor_cost = float(self.labor_entry.get())
-            if labor_cost < 0:
-                raise ValueError()
-        except ValueError:
-            messagebox.showerror('Error', 'Mano de obra inválida')
-            self.labor_entry.focus()
-            return
-        
-        # Obtener nombre de obra
-        work_name = self.work_name_entry.get().strip() or None
-        
-        # Obtener el documento completo del editor WYSIWYG
-        notes = None
-        formatted_notes = None
-        if hasattr(self, 'document_editor'):
-            # Guardar el documento completo tal como está en el editor
-            formatted_notes = self.document_editor.get_plain_text()
-            notes = formatted_notes  # notes se usa para búsquedas simples
-        
-        try:
-            # Crear o actualizar presupuesto
-            if self.quote_id:
+            dao = PresupuestoDAO(self.db)
+            session = self.db.get_session()
+
+            qdate = self.fecha_input.date()
+            fecha = datetime(qdate.year(), qdate.month(), qdate.day())
+
+            qdate_validez = self.fecha_validez_input.date()
+            fecha_validez = date(qdate_validez.year(), qdate_validez.month(), qdate_validez.day())
+
+            data = {
+                'numero': self.numero_input.text(),
+                'cliente_id': self.cliente_combo.currentData(),
+                'fecha_creacion': fecha,
+                'fecha_validez': fecha_validez,
+                'titulo': self.titulo_input.text().strip(),
+                'descripcion': self.descripcion_input.toPlainText().strip(),
+                'estado': self.estado_combo.currentText(),
+                'coste_mano_obra': self.coste_mano_obra_input.value(),
+                'descuento_global': self.descuento_input.value()
+            }
+
+            if self.presupuesto:
                 # Actualizar presupuesto existente
-                db.update_quote(
-                    self.quote_id, client_id, client_name, 
-                    client_address, client_dni, work_name=work_name, 
-                    labor_cost=labor_cost, notes=notes, formatted_notes=formatted_notes
-                )
-                # Eliminar items antiguos y añadir nuevos
-                quote, old_items = db.get_quote(self.quote_id)
-                for old_item in old_items:
-                    db.delete_quote_item(old_item['id'])
-                quote_id = self.quote_id
+                presupuesto = dao.actualizar(self.presupuesto.id, **data)
+
+                # Eliminar líneas antiguas
+                for linea in self.presupuesto.lineas:
+                    session.delete(linea)
+                session.commit()
             else:
                 # Crear nuevo presupuesto
-                quote_id = db.create_quote(
-                    client_id, client_name, client_address, 
-                    client_dni, work_name=work_name, labor_cost=labor_cost,
-                    notes=notes, formatted_notes=formatted_notes
+                presupuesto = dao.crear(**data)
+
+            # Añadir líneas
+            for orden, line_data in enumerate(self.lineas_temp):
+                linea = LineaPresupuesto(
+                    presupuesto_id=presupuesto.id,
+                    material_id=line_data['material_id'],
+                    cantidad=line_data['cantidad'],
+                    precio_compra_unitario=line_data['precio_compra_unitario'],
+                    margen_ganancia_porc=line_data['margen_ganancia_porc'],
+                    descripcion_personalizada=line_data.get('descripcion_personalizada', ''),
+                    orden=orden
                 )
-            
-            # Añadir items y actualizar precios en BD si han cambiado
-            for item in self.items_data:
-                # Obtener precio de proveedor (items_data es dict, sí tiene .get())
-                supplier_price = item.get('supplier_price', 0) or 0
-                
-                db.add_quote_item(
-                    quote_id, item['material_id'], item['name'],
-                    item['description'], item['image_path'],
-                    item['price'], item['quantity'], supplier_price
-                )
-                
-                # Actualizar precio del material en BD si ha cambiado
-                if item['material_id']:
-                    original_price = item.get('original_price', item['price'])
-                    if item['price'] != original_price:
-                        # Obtener material actual de la BD
-                        material = db.get_material(item['material_id'])
-                        if material:
-                            # Actualizar solo el precio de venta, manteniendo otros campos
-                            try:
-                                material_supplier_price = material['supplier_price'] or 0
-                            except (KeyError, IndexError):
-                                material_supplier_price = 0
-                            db.update_material(
-                                item['material_id'],
-                                material['name'],
-                                material['description'],
-                                material['image_path'],
-                                item['price'],  # Nuevo precio de venta
-                                material['category'],
-                                material_supplier_price  # Mantener precio de proveedor
-                            )
-            
-            action = 'actualizado' if self.quote_id else 'creado'
-            
-            # Callback de actualización
-            if self.on_save:
-                self.on_save()
-            
-            # Cerrar la ventana primero
-            self.destroy()
-            
-            # Mostrar mensaje después de cerrar (se muestra en la ventana padre)
-            messagebox.showinfo('Éxito', f'Presupuesto #{quote_id} {action}')
-            
+                session.add(linea)
+
+            session.commit()
+            self.db.close_session(session)
+
+            self.presupuesto = presupuesto
+            self.accept()
+
         except Exception as e:
-            messagebox.showerror('Error', f'Error al guardar: {str(e)}')
+            show_error(self, "Error", f"Error al guardar el presupuesto: {str(e)}")
+
+    def get_presupuesto(self):
+        """Retorna el presupuesto creado/editado"""
+        return self.presupuesto
+
+
+class QuotesManager(QWidget):
+    """Widget para gestionar presupuestos"""
+
+    quote_selected = pyqtSignal(object)
+    material_updated = pyqtSignal(int)  # Señal para propagar actualizaciones de materiales
+
+    def __init__(self, db: Database, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.dao = PresupuestoDAO(db)
+        self.init_ui()
+        self.load_quotes()
+
+    def init_ui(self):
+        """Inicializa la interfaz"""
+        layout = QVBoxLayout()
+
+        # Barra de herramientas
+        toolbar = QHBoxLayout()
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Buscar presupuesto...")
+
+        self.new_button = QPushButton("Nuevo Presupuesto")
+        self.new_button.clicked.connect(self.new_quote)
+
+        self.edit_button = QPushButton("Editar")
+        self.edit_button.clicked.connect(self.edit_quote)
+        self.edit_button.setEnabled(False)
+
+        self.view_button = QPushButton("Ver/Generar PDF")
+        self.view_button.clicked.connect(self.view_quote)
+        self.view_button.setEnabled(False)
+
+        self.delete_button = QPushButton("Eliminar")
+        self.delete_button.clicked.connect(self.delete_quote)
+        self.delete_button.setEnabled(False)
+
+        toolbar.addWidget(QLabel("Buscar:"))
+        toolbar.addWidget(self.search_input)
+        toolbar.addStretch()
+        toolbar.addWidget(self.new_button)
+        toolbar.addWidget(self.edit_button)
+        toolbar.addWidget(self.view_button)
+        toolbar.addWidget(self.delete_button)
+
+        layout.addLayout(toolbar)
+
+        # Tabla de presupuestos
+        self.table = QTableWidget()
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels([
+            "ID", "Número", "Cliente", "Fecha", "Total", "Estado", "Líneas"
+        ])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.itemSelectionChanged.connect(self.on_selection_changed)
+        self.table.doubleClicked.connect(self.edit_quote)
+
+        # Ocultar columna ID
+        self.table.setColumnHidden(0, True)
+
+        layout.addWidget(self.table)
+
+        self.setLayout(layout)
+
+    def load_quotes(self):
+        """Carga todos los presupuestos en la tabla"""
+        try:
+            presupuestos = self.dao.obtener_todos()
+            self.populate_table(presupuestos)
+        except Exception as e:
+            show_error(self, "Error", f"Error al cargar presupuestos: {str(e)}")
+
+    def populate_table(self, presupuestos):
+        """Rellena la tabla con los presupuestos"""
+        self.table.setRowCount(0)
+
+        for presupuesto in presupuestos:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+
+            self.table.setItem(row, 0, QTableWidgetItem(str(presupuesto.id)))
+            self.table.setItem(row, 1, QTableWidgetItem(presupuesto.numero))
+            self.table.setItem(row, 2, QTableWidgetItem(str(presupuesto.cliente)))
+            self.table.setItem(row, 3, QTableWidgetItem(format_date(presupuesto.fecha_creacion)))
+            self.table.setItem(row, 4, QTableWidgetItem(format_currency(presupuesto.total_final)))
+            self.table.setItem(row, 5, QTableWidgetItem(presupuesto.estado))
+            self.table.setItem(row, 6, QTableWidgetItem(str(len(presupuesto.lineas))))
+
+    def new_quote(self):
+        """Crea un nuevo presupuesto"""
+        dialog = QuoteEditor(self, db=self.db)
+        # Conectar señal de actualización de material
+        dialog.material_updated.connect(self.material_updated.emit)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            show_info(self, "Éxito", "Presupuesto creado correctamente")
+            self.load_quotes()
+
+    def edit_quote(self):
+        """Edita el presupuesto seleccionado"""
+        selected_row = self.table.currentRow()
+        if selected_row < 0:
+            return
+
+        presupuesto_id = int(self.table.item(selected_row, 0).text())
+        presupuesto = self.dao.obtener_por_id(presupuesto_id)
+
+        if not presupuesto:
+            show_error(self, "Error", "Presupuesto no encontrado")
+            return
+
+        dialog = QuoteEditor(self, db=self.db, presupuesto=presupuesto)
+        # Conectar señal de actualización de material
+        dialog.material_updated.connect(self.material_updated.emit)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            show_info(self, "Éxito", "Presupuesto actualizado correctamente")
+            self.load_quotes()
+
+    def view_quote(self):
+        """Ver/Generar PDF del presupuesto"""
+        selected_row = self.table.currentRow()
+        if selected_row < 0:
+            return
+
+        presupuesto_id = int(self.table.item(selected_row, 0).text())
+        presupuesto = self.dao.obtener_por_id(presupuesto_id)
+
+        if not presupuesto:
+            show_error(self, "Error", "Presupuesto no encontrado")
+            return
+
+        try:
+            # Si ya existe HTML guardado, usarlo; si no, generar desde plantilla
+            if presupuesto.contenido_html:
+                html_content = presupuesto.contenido_html
+            else:
+                # Generar HTML desde la plantilla
+                engine = TemplateEngine()
+                html_content = engine.render_quote(presupuesto)
+
+            # Mostrar en el visor con opción de editar
+            viewer = DocumentViewer(
+                self,
+                html_content,
+                f"Presupuesto {presupuesto.numero}",
+                editable=True
+            )
+
+            if viewer.exec() == QDialog.DialogCode.Accepted:
+                # Solo guardar si se editó el documento
+                if viewer.was_edited():
+                    edited_html = viewer.get_html_content()
+                    # Guardar el HTML editado en la base de datos
+                    self.dao.actualizar(presupuesto.id, contenido_html=edited_html)
+                    show_info(self, "Guardado", "Los cambios se han guardado correctamente")
+
+        except Exception as e:
+            show_error(self, "Error", f"Error al generar el documento: {str(e)}")
+
+    def delete_quote(self):
+        """Elimina el presupuesto seleccionado"""
+        selected_row = self.table.currentRow()
+        if selected_row < 0:
+            return
+
+        presupuesto_id = int(self.table.item(selected_row, 0).text())
+        numero = self.table.item(selected_row, 1).text()
+
+        if not confirm_dialog(self, "Confirmar",
+                              f"¿Está seguro de eliminar el presupuesto '{numero}'?\n"
+                              f"Esta acción es irreversible."):
+            return
+
+        try:
+            if self.dao.eliminar(presupuesto_id):
+                show_info(self, "Éxito", "Presupuesto eliminado correctamente")
+                self.load_quotes()
+            else:
+                show_error(self, "Error", "No se pudo eliminar el presupuesto")
+        except Exception as e:
+            show_error(self, "Error", f"Error al eliminar el presupuesto: {str(e)}")
+
+    def on_selection_changed(self):
+        """Maneja el cambio de selección en la tabla"""
+        has_selection = len(self.table.selectedItems()) > 0
+        self.edit_button.setEnabled(has_selection)
+        self.view_button.setEnabled(has_selection)
+        self.delete_button.setEnabled(has_selection)
+
+        if has_selection:
+            selected_row = self.table.currentRow()
+            presupuesto_id = int(self.table.item(selected_row, 0).text())
+            presupuesto = self.dao.obtener_por_id(presupuesto_id)
+            self.quote_selected.emit(presupuesto)
