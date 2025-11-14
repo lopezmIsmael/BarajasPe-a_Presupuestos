@@ -244,14 +244,14 @@ class AddLineDialog(QDialog):
                 # Usar el precio de venta del material
                 self.precio_venta_unitario_input.setValue(material.precio_venta)
                 # Calcular el margen real del material
-                margen_real = ((material.precio_venta - material.precio_compra) / material.precio_compra) * 100
+                margen_real = 100 * (1 - (material.precio_compra / material.precio_venta))
                 self.margen_input.setValue(margen_real)
             else:
                 # Si no hay precio de venta, usar el margen por defecto del material
                 margen_defecto = material.margen_ganancia_defecto if material.margen_ganancia_defecto else 20.0
                 self.margen_input.setValue(margen_defecto)
                 # Calcular precio de venta basado en margen
-                precio_venta = material.precio_compra * (1 + margen_defecto / 100.0)
+                precio_venta = material.precio_compra / (1 - margen_defecto / 100.0)
                 self.precio_venta_unitario_input.setValue(precio_venta)
 
         finally:
@@ -269,7 +269,7 @@ class AddLineDialog(QDialog):
         try:
             precio_compra = self.precio_compra_input.value()
             margen = self.margen_input.value()
-            precio_venta_unitario = precio_compra * (1 + margen / 100.0)
+            precio_venta_unitario = precio_compra / (1 - margen / 100.0)
             self.precio_venta_unitario_input.setValue(precio_venta_unitario)
             self.calcular_totales()
         finally:
@@ -284,7 +284,7 @@ class AddLineDialog(QDialog):
         try:
             precio_compra = self.precio_compra_input.value()
             margen = self.margen_input.value()
-            precio_venta_unitario = precio_compra * (1 + margen / 100.0)
+            precio_venta_unitario = precio_compra / (1 - margen / 100.0)
             self.precio_venta_unitario_input.setValue(precio_venta_unitario)
             self.calcular_totales()
         finally:
@@ -301,7 +301,7 @@ class AddLineDialog(QDialog):
             precio_venta = self.precio_venta_unitario_input.value()
 
             if precio_compra > 0:
-                margen = ((precio_venta - precio_compra) / precio_compra) * 100
+                margen = 100 * (1-(precio_compra / precio_venta))
                 self.margen_input.setValue(margen)
 
             self.calcular_totales()
@@ -351,7 +351,7 @@ class AddLineDialog(QDialog):
             self.margen_input.setValue(self.linea.margen_ganancia_porc)
 
             # Calcular precio de venta unitario desde la línea
-            precio_venta_unitario = self.linea.precio_compra_unitario * (1 + self.linea.margen_ganancia_porc / 100.0)
+            precio_venta_unitario = self.linea.precio_compra_unitario / (1 - self.linea.margen_ganancia_porc / 100.0)
             self.precio_venta_unitario_input.setValue(precio_venta_unitario)
 
             self.descripcion_input.setPlainText(self.linea.descripcion_personalizada or "")
@@ -710,7 +710,7 @@ class QuoteEditor(QDialog):
             precio_compra = line_data['precio_compra_unitario']
             margen = line_data['margen_ganancia_porc']
 
-            precio_venta_unit = precio_compra * (1 + margen / 100)
+            precio_venta_unit = precio_compra / (1 - margen / 100)
             total_venta = precio_venta_unit * cantidad
 
             self.lines_table.setItem(row, 0, QTableWidgetItem(material.nombre))
@@ -732,7 +732,7 @@ class QuoteEditor(QDialog):
             margen = line_data['margen_ganancia_porc']
 
             coste = cantidad * precio_compra
-            venta = coste * (1 + margen / 100)
+            venta = coste / (1 - margen / 100)
 
             total_coste += coste
             total_venta += venta
@@ -848,16 +848,21 @@ class QuoteEditor(QDialog):
                     dao_material = MaterialDAO(editor.db)
                     for linea_data in editor.lineas_temp:
                         material = dao_material.obtener_por_id(linea_data['material_id'])
+                        # Calcular valores según la fórmula: precio_venta = coste / (1 - margen/100)
+                        coste_total = linea_data['cantidad'] * linea_data['precio_compra_unitario']
+                        precio_venta_total = coste_total / (1 - linea_data['margen_ganancia_porc'] / 100)
+                        ganancia_importe = precio_venta_total - coste_total
+
                         linea = type('LineaTemporal', (), {
                             'material': material,
                             'cantidad': linea_data['cantidad'],
                             'precio_compra_unitario': linea_data['precio_compra_unitario'],
                             'margen_ganancia_porc': linea_data['margen_ganancia_porc'],
                             'descripcion_personalizada': linea_data.get('descripcion_personalizada', ''),
-                            'coste_total': linea_data['cantidad'] * linea_data['precio_compra_unitario'],
-                            'ganancia_importe': (linea_data['cantidad'] * linea_data['precio_compra_unitario']) * (linea_data['margen_ganancia_porc'] / 100),
-                            'precio_venta_unitario': linea_data['precio_compra_unitario'] * (1 + linea_data['margen_ganancia_porc'] / 100),
-                            'precio_venta_total': (linea_data['cantidad'] * linea_data['precio_compra_unitario']) * (1 + linea_data['margen_ganancia_porc'] / 100)
+                            'coste_total': coste_total,
+                            'ganancia_importe': ganancia_importe,
+                            'precio_venta_unitario': linea_data['precio_compra_unitario'] / (1 - linea_data['margen_ganancia_porc'] / 100),
+                            'precio_venta_total': precio_venta_total
                         })()
                         self.lineas.append(linea)
 

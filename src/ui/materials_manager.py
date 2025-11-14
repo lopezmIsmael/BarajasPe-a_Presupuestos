@@ -148,7 +148,7 @@ class MaterialDialog(QDialog):
         precio_compra = self.precio_compra_input.value()
         margen = self.margen_input.value()
 
-        precio_venta = precio_compra * (1 + margen / 100)
+        precio_venta = precio_compra / (1 - margen / 100)
         self.precio_venta_input.setValue(precio_venta)
 
     def load_data(self):

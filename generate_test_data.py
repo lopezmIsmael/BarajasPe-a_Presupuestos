@@ -260,10 +260,10 @@ def generar_datos_prueba():
             'cliente': clientes[0],  # Juan García
             'fecha_creacion': datetime.now() - timedelta(days=15),
             'lineas': [
-                (materiales[0], 20, 1.15),  # Cemento
-                (materiales[1], 3, 1.20),   # Arena
-                (materiales[3], 500, 1.10), # Ladrillos
-                (materiales[9], 3, 1.25),   # Pintura
+                (materiales[0], 20, 15),  # Cemento - margen 15%
+                (materiales[1], 3, 20),   # Arena - margen 20%
+                (materiales[3], 500, 10), # Ladrillos - margen 10%
+                (materiales[9], 3, 25),   # Pintura - margen 25%
             ],
             'titulo': 'Reforma baño principal',
             'descripcion': 'Reforma completa de baño con cambio de sanitarios y alicatado',
@@ -274,11 +274,11 @@ def generar_datos_prueba():
             'cliente': clientes[1],  # María López
             'fecha_creacion': datetime.now() - timedelta(days=10),
             'lineas': [
-                (materiales[8], 45, 1.20),  # Gres porcelánico
-                (materiales[12], 35, 1.15), # Pladur
-                (materiales[31], 3, 1.10),  # Puertas
-                (materiales[9], 5, 1.20),   # Pintura
-                (materiales[17], 15, 1.15), # Enchufes
+                (materiales[8], 45, 20),  # Gres porcelánico - margen 20%
+                (materiales[12], 35, 15), # Pladur - margen 15%
+                (materiales[31], 3, 10),  # Puertas - margen 10%
+                (materiales[9], 5, 20),   # Pintura - margen 20%
+                (materiales[17], 15, 15), # Enchufes - margen 15%
             ],
             'titulo': 'Reforma integral vivienda 90m²',
             'descripcion': 'Reforma completa incluyendo electricidad, fontanería y acabados',
@@ -289,11 +289,11 @@ def generar_datos_prueba():
             'cliente': clientes[2],  # Constructora Alba
             'fecha_creacion': datetime.now() - timedelta(days=5),
             'lineas': [
-                (materiales[13], 5, 1.05),  # Cable 2,5mm
-                (materiales[14], 3, 1.05),  # Cable 4mm
-                (materiales[19], 1, 1.05),  # Cuadro eléctrico
-                (materiales[20], 8, 1.05),  # Magnetotérmicos
-                (materiales[21], 2, 1.05),  # Diferenciales
+                (materiales[13], 5, 5),  # Cable 2,5mm - margen 5%
+                (materiales[14], 3, 5),  # Cable 4mm - margen 5%
+                (materiales[19], 1, 5),  # Cuadro eléctrico - margen 5%
+                (materiales[20], 8, 5),  # Magnetotérmicos - margen 5%
+                (materiales[21], 2, 5),  # Diferenciales - margen 5%
             ],
             'titulo': 'Instalación eléctrica edificio oficinas',
             'descripcion': 'Instalación eléctrica completa para edificio de 3 plantas',
@@ -304,12 +304,12 @@ def generar_datos_prueba():
             'cliente': clientes[3],  # Pedro Fernández
             'fecha_creacion': datetime.now() - timedelta(days=2),
             'lineas': [
-                (materiales[22], 15, 1.15),  # Tubo multicapa 16mm
-                (materiales[23], 10, 1.15),  # Tubo multicapa 20mm
-                (materiales[27], 3, 1.20),   # Grifo lavabo
-                (materiales[28], 2, 1.20),   # Grifo ducha
-                (materiales[29], 2, 1.15),   # Inodoro
-                (materiales[30], 2, 1.15),   # Lavabo
+                (materiales[22], 15, 15),  # Tubo multicapa 16mm - margen 15%
+                (materiales[23], 10, 15),  # Tubo multicapa 20mm - margen 15%
+                (materiales[27], 3, 20),   # Grifo lavabo - margen 20%
+                (materiales[28], 2, 20),   # Grifo ducha - margen 20%
+                (materiales[29], 2, 15),   # Inodoro - margen 15%
+                (materiales[30], 2, 15),   # Lavabo - margen 15%
             ],
             'titulo': 'Instalación fontanería vivienda nueva',
             'descripcion': 'Instalación completa de fontanería para vivienda unifamiliar',
@@ -320,12 +320,12 @@ def generar_datos_prueba():
             'cliente': clientes[4],  # Inmobiliaria Hogar Feliz
             'fecha_creacion': datetime.now(),
             'lineas': [
-                (materiales[7], 120, 1.25),  # Azulejo
-                (materiales[8], 180, 1.20),  # Gres
-                (materiales[9], 15, 1.20),   # Pintura plástica
-                (materiales[10], 8, 1.20),   # Pintura esmalte
-                (materiales[31], 12, 1.15),  # Puertas 72,5
-                (materiales[35], 12, 1.10),  # Manivelas
+                (materiales[7], 120, 25),  # Azulejo - margen 25%
+                (materiales[8], 180, 20),  # Gres - margen 20%
+                (materiales[9], 15, 20),   # Pintura plástica - margen 20%
+                (materiales[10], 8, 20),   # Pintura esmalte - margen 20%
+                (materiales[31], 12, 15),  # Puertas 72,5 - margen 15%
+                (materiales[35], 12, 10),  # Manivelas - margen 10%
             ],
             'titulo': 'Acabados 4 viviendas promoción',
             'descripcion': 'Acabados para 4 viviendas en promoción nueva construcción',

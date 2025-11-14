@@ -174,18 +174,30 @@ class LineaPresupuesto(Base):
 
     @property
     def ganancia_importe(self):
-        """Ganancia en importe de esta línea"""
-        return self.coste_total * (self.margen_ganancia_porc / 100.0)
+        """Ganancia en importe de esta línea
+
+        Fórmula: ganancia = precio_venta - coste
+        Donde: precio_venta = coste / (1 - margen/100)
+        """
+        precio_venta = self.coste_total / (1 - self.margen_ganancia_porc / 100.0)
+        return precio_venta - self.coste_total
 
     @property
     def precio_venta_unitario(self):
-        """Precio de venta unitario"""
-        return self.precio_compra_unitario * (1 + self.margen_ganancia_porc / 100.0)
+        """Precio de venta unitario
+
+        Fórmula: precio_venta = precio_coste / (1 - margen/100)
+        Ejemplo: margen 30% -> precio_venta = precio_coste / 0.7
+        """
+        return self.precio_compra_unitario / (1 - self.margen_ganancia_porc / 100.0)
 
     @property
     def precio_venta_total(self):
-        """Precio de venta total de esta línea"""
-        return self.coste_total + self.ganancia_importe
+        """Precio de venta total de esta línea
+
+        Fórmula: precio_venta_total = coste_total / (1 - margen/100)
+        """
+        return self.coste_total / (1 - self.margen_ganancia_porc / 100.0)
 
     def __repr__(self):
         return f"{self.material.nombre} x{self.cantidad} - {self.precio_venta_total:.2f}€"
